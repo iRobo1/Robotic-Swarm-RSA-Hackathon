@@ -1,5 +1,7 @@
 import math
 import time
+import threading
+import asyncio
 from big_mirte_library import Robot, Communication
 
 # Initialize the robot 
@@ -8,17 +10,21 @@ comm = Communication()
 
 # --- STATE VARIABLES ---
 
+TEST_MODE_NO_CAMERA = True # Set to True for simulation without camera
 current_x = 0.0
 current_y = 0.0
 current_angle = 0.0
 is_moving_allowed = False 
+is_visible = True # Assume we start with vision. 
 
 target_x = None
 target_y = None
+target_angle = None
 
-# Defining current state
-start_x = 0.5   # Placeholder: 0.5 meters from the X edge
-start_y = 1.0   # Placeholder: 1.0 meters from the Y edge
+# Defining starting state
+start_x = 0.5   # CHANGE!! Placeholder: 0.5 meters from the X edge
+start_y = 1.0   # CHANGE!! Placeholder: 1.0 meters from the Y edge
+start_angle = 0.0   # Define angle in starting line (in radians: 0.0 Forward (x-axis), pi/2 Left (y-axis), pi Backward, -pi/2 Right)
 navigation_state = "IDLE" # States: "IDLE", "DELIVERING", "RETURNING"
 
 # APF Tuning Parameters
@@ -39,10 +45,11 @@ comm.register_callback_objective(mirte.on_receive_objective) # The library's Rob
 
 def on_receive_location(x, y, angle, visible, last_seen):
     """Updates the robot's current position."""
-    global current_x, current_y, current_angle
+    global current_x, current_y, current_angle, is_visible
     current_x = x
     current_y = y
     current_angle = angle
+    is_visible = visible    # safe stop in case we lose vision of the robot
 
 def on_receive_start():
     """Starts the robot's movement."""
@@ -129,10 +136,35 @@ def calculate_local_apf_vector():
     
     return total_x, total_y
 
+def calculate_angular_velocity():
+    """Calculates the rotation speed needed to face the target_angle."""
+    if target_angle is None:
+        return 0.0
+        
+    # Calculate difference between current heading and desired heading
+    angle_error = target_angle - current_angle
+    
+    # Normalize the error so the robot takes the shortest spinning path (-pi to pi)
+    while angle_error > math.pi: angle_error -= 2 * math.pi
+    while angle_error < -math.pi: angle_error += 2 * math.pi
+    
+    # Proportional control: turn faster if far away, slower if close
+    K_ANGULAR = 0.8 
+    angular_z = K_ANGULAR * angle_error
+    
+    # Cap the maximum spin speed so it doesn't get dizzy
+    MAX_SPIN = 0.5 
+    if angular_z > MAX_SPIN: angular_z = MAX_SPIN
+    elif angular_z < -MAX_SPIN: angular_z = -MAX_SPIN
+        
+    return angular_z
 
 def apply_motor_commands(local_x, local_y):
     """Safely limits speed and sends local forces directly to the Mecanum wheels."""
-    if local_x == 0 and local_y == 0:
+
+    angular_z = calculate_angular_velocity()    # Get rotation to face the target
+
+    if local_x == 0 and local_y == 0 and angular_z == 0:
         stop_motors()
         return
 
@@ -144,11 +176,36 @@ def apply_motor_commands(local_x, local_y):
         local_y *= scaling_factor
 
     # Drive command: linear_x (forward/back), linear_y (left/right), angular_z (rotation)
-    mirte.drive(local_x, local_y, 0.0) 
+    mirte.drive(local_x, local_y, angular_z) 
+
+    # UPDATE THE FAKE CAMERA (If in testing mode)
+    if TEST_MODE_NO_CAMERA:
+        simulate_camera_feedback(local_x, local_y, angular_z)
 
 
 def stop_motors():
     mirte.drive(0.0, 0.0, 0.0)
+
+# FAKE CAMERA SIMULATION (For Testing Without Actual Vision)
+def simulate_camera_feedback(local_vx, local_vy, angular_vz, dt=0.05):
+    """Guesses the robot's new global position based on its speed."""
+    global current_x, current_y, current_angle, is_visible
+    
+    # In test mode, we are always "visible"
+    is_visible = True 
+    
+    # Convert local wheel velocities to global map movements
+    global_dx = (local_vx * math.cos(current_angle) - local_vy * math.sin(current_angle)) * dt
+    global_dy = (local_vx * math.sin(current_angle) + local_vy * math.cos(current_angle)) * dt
+    
+    # Update the robot's internal tracker
+    current_x += global_dx
+    current_y += global_dy
+    current_angle += angular_vz * dt
+    
+    # Normalize the angle
+    while current_angle > math.pi: current_angle -= 2 * math.pi
+    while current_angle < -math.pi: current_angle += 2 * math.pi
 
 
 
@@ -177,13 +234,23 @@ def execute_dropoff_sequence():
 # --- MAIN LOOP ---
 
 def main():
-    global target_x, target_y, navigation_state
+    global target_x, target_y, target_angle, navigation_state, is_moving_allowed
     print("Mirte Master Navigation Initialized. Waiting for start message...")
     
     try:
+        if TEST_MODE_NO_CAMERA == True:
+            is_moving_allowed = True # Hardcoded for testing, delete after
+            mirte.objective_queue.put({"x": 2.0, "y": 0.0})
         while True:
             # Only execute movement logic if the competition is running
             if is_moving_allowed:
+
+                # SAFETY OVERRIDE: Can the camera see the Robot?
+                if not is_visible:
+                    stop_motors()
+                    # We skip the rest of the loop until the camera sees us again
+                    time.sleep(0.05)
+                    continue
 
                 # STATE 1: IDLE (Waiting at Starting Zone)
                 if navigation_state == "IDLE":
@@ -227,15 +294,17 @@ def main():
                 
                 # STATE 3: RETURNING (Driving Home)
                 elif navigation_state == "RETURNING":
+                    target_angle = start_angle # We want to face the line, to pick up the next item
                     dist_to_goal = math.sqrt((target_x - current_x)**2 + (target_y - current_y)**2)
                     
-                    if dist_to_goal < 0.20: # Slightly larger tolerance for home base
+                    if dist_to_goal < 0.05: # Tolerance for the starting position
                         print("Arrived back at Home Base. Ready for next item.")
                         stop_motors()
                         
                         # Clear targets and wait for the next queue item
                         target_x = None
                         target_y = None
+                        target_angle = None
                         navigation_state = "IDLE"
                         
                     else:

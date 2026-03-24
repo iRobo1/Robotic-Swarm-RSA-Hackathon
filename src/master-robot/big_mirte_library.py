@@ -22,6 +22,8 @@ import math
 import numpy as np
 from queue import Queue
 
+from sensor_msgs.msg import LaserScan
+
 class Communication:
     def __init__(self):
         self.location_callback = None
@@ -151,6 +153,12 @@ class Robot:
         self.arm_pub = SafePublisher(self.node.create_publisher(JointTrajectory, "/mirte_master_arm_controller/joint_trajectory", 10), self, None)
         self.gripper_client = ActionClient(self.node, GripperCommand, "/mirte_master_gripper_controller/gripper_cmd")
         self.img_subscriber = self.node.create_subscription(Image, "/camera/color/image_raw", self.on_receive_image, 10)
+        
+        # Initialize an empty array for our LiDAR data
+        self.lidar_data = []
+        
+        # Subscribe to the LiDAR topic (usually "/scan" in ROS)
+        self.lidar_subscriber = self.node.create_subscription(LaserScan, "/scan", self.on_receive_lidar, 10)
 
     def clamp_linear_speed(self, value, low, high):
         if value > 0.0 and value < 0.05:
@@ -343,3 +351,9 @@ class Robot:
         }
         
         self.objective_queue.put(new_objective)
+    
+    def on_receive_lidar(self, msg):
+        """Callback to store the latest LiDAR distances (in meters)."""
+        # msg.ranges is an array/tuple of distances.
+        # We convert it to a list so it's easy to use in our APF math.
+        self.lidar_data = list(msg.ranges)
