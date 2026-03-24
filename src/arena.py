@@ -26,7 +26,7 @@ class PioneerRobot(Robot):
     pass
 
 
-class MainRobot(Robot):
+class GripperRobot(Robot):
     pass
 
 
