@@ -1,0 +1,2 @@
+# High-Level Strategy
+Explain here what the gripper robot will do on a high-level, such as how it picks targets, how it pathfinds to them, what algorithms will be used, etc. A brief explanation is all that is needed. This helps other team members quickly understand what your code is doing without reading all of it.
