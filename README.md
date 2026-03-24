@@ -3,7 +3,12 @@ Just an empty readme
 We're team number `5` with the RED team colour. 
 
 ## Working With Github
-When implementing a new feature, create a new branch called `feature/<descriptive name>` from the `development` branch. Commit your changes frequently. Create a pull request when your feature is ready and have someone else merge it (the other person should review your code before merging it). Branches and frequent commits will help avoid complex merge conflicts.
+To implement a new feature:
+1. Create a new branch called `feature/<descriptive name>` from the `development` branch
+2. Commit your changes frequently
+3. Create a pull request when your feature is ready and have someone else merge it (the other person should review your code before merging it). Branches and frequent commits will help avoid complex merge conflicts
+
+To update `docs/` or this `README.md` you may commit directly to the development branch.
 
 ## Code Structure
 `src/` contains some folders for code. Feel free to expand the folder structure. Try to include a comment at the top of every file or a README.md in every folder that briefly describes what the file or folder contains.
