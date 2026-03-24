@@ -1,0 +1,5 @@
+apriltag
+requests
+websockets
+opencv-python
+numpy
