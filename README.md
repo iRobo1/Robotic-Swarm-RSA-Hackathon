@@ -13,6 +13,13 @@ To update `docs/` or this `README.md` you may commit directly to the development
 ## Code Structure
 `src/` contains some folders for code. Feel free to expand the folder structure. Try to include a comment at the top of every file or a README.md in every folder that briefly describes what the file or folder contains.
 
+`src/communication` - for all things related to communicating between the robots and the server (i.e., http requests all go there)<br>
+`src/computer-vision` - for all the code that processes and analyses data from the robot cameras and LiDAR<br>
+`src/gripper-robot` - the gripper robot code goes in here (there are several files, feel free to add more)<br>
+`src/pioneer-robot` - the pioneer robot code goes in here (there are several files, feel free to add more)<br>
+`src/arena.py` - contains a bunch of abstractions for objects inside the arena (robots, teams, baskets, obstacles, arena)<br>
+`src/main.py` - main entry point to the program
+
 ## Documentation
 Use `docs/` to store any plans, strategies, and ideas. Also use it to store pictures and other materials for the final presentation.
 
