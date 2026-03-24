@@ -21,7 +21,7 @@ class Obstacle:
 
 
 class Arena:
-    def __init__(self, robots: set[Robot]):
+    def __init__(self, robots: list[Robot]):
         self.robots = robots
         # boundary_points refers to points on the boundary of any obstacle, robot, or barrier (in any order)
-        self.boundary_points: set[Position]
+        self.boundary_points: list[Position]
