@@ -1,37 +1,7 @@
 # Arena related objects (baskets, obstacles, our robots, other robots, etc.)
 
-from enum import Enum
-
-class Team(Enum):
-    PINK = 1
-    GREEN = 2
-    YELLOW = 3
-    BLUE = 4
-    RED = 5 # Our team
-
-
-class Position:
-    def __init__(self, x: int, y: int):
-        self.x = x
-        self.y = y
-
-
-class Robot:
-    def __init__(self, pos: Position, angle: float):
-        self.pos = pos
-        self.angle = angle
-
-
-class PioneerRobot(Robot):
-    pass
-
-
-class GripperRobot(Robot):
-    pass
-
-
-class EnemyRobot(Robot):
-    pass
+from utils import Position
+from robot import Robot, Team
 
 
 class Basket:
@@ -40,17 +10,18 @@ class Basket:
         self.pos = pos
         self.angle = angle
         self.team = team
-        self.completed = False
+        self.discovered = False # whether any team has scanned the basket's April Tag yet
+        self.completed = False # whether our Gripper robot has dropped an item in the basket
 
 
-# A single obstacle (a connected component of points forming one obstacle)
+# A single obstacle (a connected component of points in CW order forming one obstacle)
 class Obstacle:
     def __init__(self, boundary: list[Position]):
         self.boundary = boundary
 
 
 class Arena:
-    def __init__(self, robots: list[Robot], obstacle_boundaries: list[Position]):
+    def __init__(self, robots: list[Robot]):
         self.robots = robots
-        # obstacle_boundaries refers to points on the boundary of any obstacle (in any order)
-        self.obstacle_boundaries = obstacle_boundaries
+        # boundary_points refers to points on the boundary of any obstacle, robot, or barrier (in any order)
+        self.boundary_points: list[Position]
