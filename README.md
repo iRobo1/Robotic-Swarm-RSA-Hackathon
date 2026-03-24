@@ -36,7 +36,7 @@ Manually moving the robot:
 4. Login using the username "mirte" and the password (above)
 5. Use the control panel to control the robots
 
-Using VS Code:
+Using VS Code (steps directly from the slides; not the best workflow. Will be updated when someone figures out a proper way to do this):
 1. Go to http:172.18.2.\<team\>\<robot\>:8000 to open VS Code
 2. Copy over the small_mirte_library.py file to the workdir folder
 (You can find the file at https://cloud.rsadelft.nl/s/swarming, then drag it into VS Code)
@@ -45,3 +45,4 @@ Using VS Code:
 ```pip install apriltag requests websockets opencv-python numpy```
 
 ## Connecting to the MIRTE Master Robot
+Missing
