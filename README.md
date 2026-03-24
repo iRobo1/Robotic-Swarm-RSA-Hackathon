@@ -37,17 +37,17 @@ Team 3 password (the team 5 robots are not ready yet): stagnant-attractor-compan
 Manually moving the robot:
 1. Flip the power switch (wait 1-2 min for startup)
 2. Connect to WiFi (Swarming Team X)
-3. Navigate to http://172.18.2.\<team\>\<robot\> e.g. Team 2, Robot 4 -> http://172.18.2.24
+3. Navigate to http://172.18.2.\<team\>\<robot\> e.g. Team 5, Robot 1 -> http://172.18.2.51
 4. Login using the username "mirte" and the password (above)
 5. Use the control panel to control the robots
 
 Using VS Code (steps directly from the slides; not the best workflow. Will be updated when someone figures out a proper way to do this):
-1. Go to http:172.18.2.\<team\>\<robot\>:8000 to open VS Code
+1. Go to http://172.18.2.\<team\>\<robot\>:8000 to open VS Code
 2. Copy over the small_mirte_library.py file to the workdir folder
 (You can find the file at https://cloud.rsadelft.nl/s/swarming, then drag it into VS Code)
 3. Create workshop.py int he workdir folder
 4. Install dependencies with:
-```pip install apriltag requests websockets opencv-python numpy```
+```pip install -r requirements.txt```
 
 ## Connecting to the MIRTE Master Robot
 Missing
