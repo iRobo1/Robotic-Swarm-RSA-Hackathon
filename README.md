@@ -1,6 +1,11 @@
 Just an empty readme
 # Team Thermites
-We're team number `5` with the RED team colour. 
+We're team number `5` with the RED team colour.
+
+## Install Dependencies
+Run in the root directory: <br>
+```pip install -r requirements.txt``` <br>
+(you may run into issues with installing apriltag)
 
 ## Working With Github
 To implement a new feature:
