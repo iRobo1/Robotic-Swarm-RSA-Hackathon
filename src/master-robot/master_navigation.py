@@ -1,109 +1,145 @@
+import sys
+import os
 import math
 import time
 import threading
-import asyncio
-from big_mirte_library import Robot, Communication
+import queue
+import rclpy
+from sensor_msgs.msg import LaserScan
 
-# Initialize the robot 
-mirte = Robot(team_id=5, authorization=None, dev_mode=TEST_MODE)
-comm = Communication()
+# Import from the libraries
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
 
-# --- STATE VARIABLES ---
-TEST_MODE = True
-TEST_MODE_NO_CAMERA = False # Set to True for simulation without camera
-current_x = 0.0
-current_y = 0.0
-current_angle = 0.0
+# Now we can safely import from their library folder!
+from library import utils
+from library.robot_big import Robot
+from library.communication import Communication
+
+# ==========================================
+# 1. INITIALIZATION & SETUP
+# ==========================================
+
+# CRITICAL: We must initialize ROS 2 before calling Robot()
+rclpy.init()
+
+# Dynamically grab credentials from the robot's OS using utils!
+try:
+    TEAM_ID, ROBOT_ID = utils.get_team_robot_id()
+    PASSWORD = utils.get_password().strip()
+    print(f"Logged in as Team {TEAM_ID}, Robot {ROBOT_ID}")
+except Exception as e:
+    print(f"Warning: Could not auto-load credentials (are you testing on your laptop?). Defaulting to Team 5.")
+    TEAM_ID, ROBOT_ID, PASSWORD = 5, 0, "test3"
+
+# Initialize Robot Hardware and Network
+mirte = Robot()
+HOST = "192.168.1.20:8000" # Update tomorrow if the organizers change the IP!
+comm = Communication(host=HOST, team_id=TEAM_ID, robot_id=ROBOT_ID, password=PASSWORD)
+
+# Custom Queue for Objectives
+objective_queue = queue.Queue()
+
+
+# ==========================================
+# 2. STATE VARIABLES & APF TUNING
+# ==========================================
+
+TEST_MODE_NO_CAMERA = True  # Set to True ONLY if testing without the ceiling camera!
+
+current_x, current_y, current_angle = 0.0, 0.0, 0.0
 is_moving_allowed = False 
-is_visible = True # Assume we start with vision. 
+is_visible = True 
 
-target_x = None
-target_y = None
-target_angle = None
+target_x, target_y, target_angle = None, None, None
 
-# Defining starting state
-start_x = 0.5   # CHANGE!! Placeholder: 0.5 meters from the X edge
-start_y = 1.0   # CHANGE!! Placeholder: 1.0 meters from the Y edge
-start_angle = 0.0   # Define angle in starting line (in radians: 0.0 Forward (x-axis), pi/2 Left (y-axis), pi Backward, -pi/2 Right)
+# Hardcoded Starting Zone (Update these tomorrow during practice!)
+start_x = 0.5   
+start_y = 1.0   
+start_angle = 0.0   
+
 navigation_state = "IDLE" # States: "IDLE", "DELIVERING", "RETURNING"
 
 # APF Tuning Parameters
 K_ATT = 1.0       
-K_REP = 0.5       
-D_OBSTACLE = 0.5  
-MAX_SPEED = 0.4   # Strictly enforced rule: max 0.4 m/s
+K_REP = 1.0       
+D_OBSTACLE = 0.4
+MAX_SPEED = 0.4   
+ROBOT_RADIUS = 0.15
+
+global_lidar_data = []
+
+# --- DEBUG TIMER ---
+last_debug_time = 0.0
 
 
-# Register the callbacks
-comm.register_callback_location(on_receive_location)
-comm.register_callback_start(on_receive_start)
-comm.register_callback_stop(on_receive_stop)
-comm.register_callback_objective(mirte.on_receive_objective) # The library's Robot class already has an 'on_receive_objective' method that safely puts the data into 'mirte.objective_queue'. We just map it here!
-
-
-# --- CALLBACK FUNCTIONS ---
+# ==========================================
+# 3. CALLBACK FUNCTIONS
+# ==========================================
 
 def on_receive_location(x, y, angle, visible, last_seen):
-    """Updates the robot's current position."""
     global current_x, current_y, current_angle, is_visible
     current_x = x
     current_y = y
     current_angle = angle
-    is_visible = visible    # safe stop in case we lose vision of the robot
-
-    # Passing location data to the Robot class to keep its internal state updated
-    mirte.on_receive_location(x, y, angle, visible, last_seen)
+    is_visible = visible
 
 def on_receive_start():
-    """Starts the robot's movement."""
     global is_moving_allowed
     is_moving_allowed = True
-    mirte.on_receive_start() 
     print("Competition Started! Moving allowed.")
 
 def on_receive_stop():
-    """Must stop the robot within 3 seconds."""
     global is_moving_allowed
     is_moving_allowed = False
     stop_motors()
-    mirte.on_receive_stop()
     print("STOP MESSAGE RECEIVED. Stop immediately.")
 
 def on_receive_objective(team_id, robot_id, tag_id, x, y, angle, visible, last_seen):
-    """Triggered when a Pioneer finds an objective."""
-    global target_x, target_y
-    # In a real scenario, you'd check if this objective matches your team
-    # and if you are currently holding the right item.
-    target_x = x
-    target_y = y
-    print(f"Objective found at X:{x}, Y:{y}. Setting as new target.")
+    objective_queue.put({"x": x, "y": y, "tag_id": tag_id})
+    print(f"Objective {tag_id} found at X:{x}, Y:{y}. Added to queue.")
 
-# --- NAVIGATION LOGIC (APF) ---
+def on_receive_lidar(msg):
+    global global_lidar_data
+    global_lidar_data = list(msg.ranges)
+
+# Register callbacks with the network and ROS
+comm.register_callback_location(on_receive_location)
+comm.register_callback_start(on_receive_start)
+comm.register_callback_stop(on_receive_stop)
+comm.register_callback_objective(on_receive_objective)
+mirte.node.create_subscription(LaserScan, "/scan", on_receive_lidar, 10)
+
+
+# ==========================================
+# 4. APF NAVIGATION LOGIC
+# ==========================================
 
 def get_lidar_repulsive_forces():
-    """Calculates the push away from obstacles using the 360 LiDAR array."""
+    global global_lidar_data
     rep_force_local_x = 0.0
     rep_force_local_y = 0.0
     
-    # Safely check if the lidar_data array exists and is populated
-    if not hasattr(mirte, 'lidar_data') or not mirte.lidar_data:
+    if not global_lidar_data:
         return 0.0, 0.0 
 
-    lidar_array = mirte.lidar_data 
-    num_points = len(lidar_array)
-    
+    num_points = len(global_lidar_data)
     if num_points == 0:
         return 0.0, 0.0
 
     angle_increment = (2 * math.pi) / num_points 
 
-    for i, distance in enumerate(lidar_array):
-        # Ignore infinity and NaN values from empty space
+    for i, distance in enumerate(global_lidar_data):
+        # Ignore empty space (inf/NaN) and the chassis itself (<0.05m)
         if math.isinf(distance) or math.isnan(distance):
             continue
 
-        # 0.05 ignores junk data from inside the robot chassis
-        if 0.05 < distance < D_OBSTACLE: 
+        if distance <= ROBOT_RADIUS: 
+            continue
+            
+        if ROBOT_RADIUS < distance < D_OBSTACLE: 
             beam_angle = i * angle_increment
             force_mag = K_REP * ((1.0 / distance) - (1.0 / D_OBSTACLE)) * (1.0 / (distance**2))
             
@@ -112,258 +148,175 @@ def get_lidar_repulsive_forces():
             
     return rep_force_local_x, rep_force_local_y
 
-
 def calculate_local_apf_vector():
-    """Calculates the final X and Y forces entirely in the robot's local view."""
+    global last_debug_time  # for debug printing
+
     if target_x is None or target_y is None:
         return 0.0, 0.0 
         
-    # 1. LOCAL ATTRACTIVE FORCE
     global_dx = target_x - current_x
     global_dy = target_y - current_y
     dist_to_goal = math.sqrt(global_dx**2 + global_dy**2)
     
-    if dist_to_goal < 0.15: # Arrived within 15cm
+    if dist_to_goal < 0.15: 
         return 0.0, 0.0
         
     global_angle_to_goal = math.atan2(global_dy, global_dx)
-    local_angle_to_goal = global_angle_to_goal - current_angle
-    
-    # Normalize angle
-    while local_angle_to_goal > math.pi: local_angle_to_goal -= 2 * math.pi
-    while local_angle_to_goal < -math.pi: local_angle_to_goal += 2 * math.pi
+    local_angle_to_goal = utils.angle_difference(global_angle_to_goal, current_angle) # Using utils!
     
     att_force_local_x = K_ATT * dist_to_goal * math.cos(local_angle_to_goal)
     att_force_local_y = K_ATT * dist_to_goal * math.sin(local_angle_to_goal)
     
-    # 2. LOCAL REPULSIVE FORCE
     rep_force_local_x, rep_force_local_y = get_lidar_repulsive_forces()
-    
-    # 3. TOTAL LOCAL FORCE
+
+    # Total forces
     total_x = att_force_local_x + rep_force_local_x
     total_y = att_force_local_y + rep_force_local_y
+
+    # DEBUGGING: Print forces every 2 seconds
+    current_time = time.time()
+    if current_time - last_debug_time > 0.5:
+        print(f"\n--- [{navigation_state}] ---")
+        print(f"POS:  X:{current_x:.2f}  Y:{current_y:.2f}  |  TGT: X:{target_x:.2f}  Y:{target_y:.2f}  |  DIST: {dist_to_goal:.2f}m")
+        print(f"ATT:  x:{att_force_local_x:>5.2f}  y:{att_force_local_y:>5.2f}")
+        print(f"REP:  x:{rep_force_local_x:>5.2f}  y:{rep_force_local_y:>5.2f}")
+        print(f"OUT:  x:{total_x:>5.2f}  y:{total_y:>5.2f}")
+        last_debug_time = current_time
     
     return total_x, total_y
 
 def calculate_angular_velocity():
-    """Calculates the rotation speed needed to face the target_angle."""
     if target_angle is None:
         return 0.0
         
-    # Calculate difference between current heading and desired heading
-    angle_error = target_angle - current_angle
-    
-    # Normalize the error so the robot takes the shortest spinning path (-pi to pi)
-    while angle_error > math.pi: angle_error -= 2 * math.pi
-    while angle_error < -math.pi: angle_error += 2 * math.pi
-    
-    # Proportional control: turn faster if far away, slower if close
+    angle_error = utils.angle_difference(target_angle, current_angle) # Using utils!
     K_ANGULAR = 0.8 
     angular_z = K_ANGULAR * angle_error
-    
-    # Cap the maximum spin speed so it doesn't get dizzy
-    MAX_SPIN = 0.5 
-    if angular_z > MAX_SPIN: angular_z = MAX_SPIN
-    elif angular_z < -MAX_SPIN: angular_z = -MAX_SPIN
-        
-    return angular_z
+    return utils.clamp(angular_z, -0.5, 0.5) # Using utils!
 
 def apply_motor_commands(local_x, local_y):
-    """Safely limits speed and sends local forces directly to the Mecanum wheels."""
-
-    angular_z = calculate_angular_velocity()    # Get rotation to face the target
+    angular_z = calculate_angular_velocity() 
 
     if local_x == 0 and local_y == 0 and angular_z == 0:
         stop_motors()
         return
 
     magnitude = math.sqrt(local_x**2 + local_y**2)
-    
     if magnitude > MAX_SPEED:
         scaling_factor = MAX_SPEED / magnitude
         local_x *= scaling_factor
         local_y *= scaling_factor
 
-    # Drive command: linear_x (forward/back), linear_y (left/right), angular_z (rotation)
     mirte.drive(local_x, local_y, angular_z) 
 
-    # UPDATE THE FAKE CAMERA (If in testing mode)
     if TEST_MODE_NO_CAMERA:
         simulate_camera_feedback(local_x, local_y, angular_z)
-
 
 def stop_motors():
     mirte.drive(0.0, 0.0, 0.0)
 
-# FAKE CAMERA SIMULATION (For Testing Without Actual Vision)
 def simulate_camera_feedback(local_vx, local_vy, angular_vz, dt=0.05):
-    """Guesses the robot's new global position based on its speed."""
     global current_x, current_y, current_angle, is_visible
-    
-    # In test mode, we are always "visible"
     is_visible = True 
-    
-    # Convert local wheel velocities to global map movements
     global_dx = (local_vx * math.cos(current_angle) - local_vy * math.sin(current_angle)) * dt
     global_dy = (local_vx * math.sin(current_angle) + local_vy * math.cos(current_angle)) * dt
-    
-    # Update the robot's internal tracker
     current_x += global_dx
     current_y += global_dy
     current_angle += angular_vz * dt
-    
-    # Normalize the angle
-    while current_angle > math.pi: current_angle -= 2 * math.pi
-    while current_angle < -math.pi: current_angle += 2 * math.pi
+    current_angle = utils.angle_difference(current_angle, 0.0) # Normalize
 
 
-
-# --- ARM & GRIPPER INTEGRATION ---
-# This should call the pickup and dropoff sequences
+# ==========================================
+# 5. ARM SEQUENCES
+# ==========================================
 
 def execute_pickup_sequence():
-    """Called when leaving IDLE state to grab an item from the start zone."""
     print("Executing Pickup Sequence...")
-    # e.g., mirte.open_gripper()
-    # e.g., mirte.move_arm_to(0.0, 1.0, -1.0, 0.5, 2.0)
-    # e.g., mirte.close_gripper()
+    # mirte.open_gripper()
+    # mirte.move_arm_to(0.0, 1.0, -1.0, 0.5, 2.0)
+    # mirte.close_gripper()
     time.sleep(2) 
     print("Pickup complete!")
 
 def execute_dropoff_sequence():
-    """Called when arriving at the target basket to release the item."""
     print("Executing Dropoff Sequence...")
-    # e.g., mirte.move_arm_to(0.0, 0.5, -0.5, 0.0, 2.0)
-    # e.g., mirte.open_gripper()
-    # e.g., mirte.move_arm_to(0.0, 0.0, 0.0, 0.0, 2.0) # Reset arm safely
+    # mirte.move_arm_to(0.0, 0.5, -0.5, 0.0, 2.0)
+    # mirte.open_gripper()
     time.sleep(2) 
     print("Dropoff complete!")
 
 
-# --- MAIN LOOP ---
+# ==========================================
+# 6. MAIN STATE MACHINE
+# ==========================================
 
 def main():
     global target_x, target_y, target_angle, navigation_state, is_moving_allowed
-    print("Mirte Master Navigation Initialized. Waiting for start message...")
-
-    # --- AUTOMATIC HARDWARE START ---
-    if TEST_MODE:
-        print("\n------TEST MODE ACTIVE-----")
-        print("Robot will start moving in 3 seconds...")
-        time.sleep(3) # 3seconds delay
-        
-        is_moving_allowed = True
-        mirte.on_receive_start() # Force the library into the STARTED state
-
-        # Inject a fake objective so the Master has somewhere to drive!
-        mirte.objective_queue.put({"x": 1.5, "y": 1.5}) 
-        print("Test objective position injected.\n")
+    
+    print("\n" + "="*40)
+    print(" MIRTE MASTER NAV: READY")
+    print("="*40)
+    print("Starting in 3 seconds... STAND CLEAR!")
+    time.sleep(3) 
+    
+    # ⚠️ OFFLINE TEST OVERRIDE: 
+    is_moving_allowed = True
+    objective_queue.put({"x": 1.5, "y": 1.5, "tag_id": 99}) 
+    print("Offline Test Objective Injected.\n")
     
     try:
         while True:
-            # Only execute movement logic if the competition is running
             if is_moving_allowed:
-
-                # SAFETY OVERRIDE: Can the camera see the Robot?
                 if not is_visible:
                     stop_motors()
-                    # Add moving the arm 
-                    # We skip the rest of the loop until the camera sees us again
                     time.sleep(0.05)
                     continue
 
-                # STATE 1: IDLE (Waiting at Starting Zone)
                 if navigation_state == "IDLE":
-                    # Check if Pioneers found something
-                    if not mirte.objective_queue.empty():
-                        print("Objective in queue! Preparing for departure...")
-                        
-                        # Grab the item from the start zone
+                    if not objective_queue.empty():
                         execute_pickup_sequence()
-                        
-                        # Pop the objective and set our new target
-                        next_objective = mirte.objective_queue.get() 
+                        next_objective = objective_queue.get() 
                         target_x = next_objective["x"]
                         target_y = next_objective["y"]
-                        
-                        # Switch state to drive
                         navigation_state = "DELIVERING"
-                        print(f"Item secured. Navigating to Objective at X:{target_x:.2f}, Y:{target_y:.2f}")
+                        print(f"Navigating to Objective at X:{target_x:.2f}, Y:{target_y:.2f}")
 
-                # STATE 2: DELIVERING (Driving to Basket)
                 elif navigation_state == "DELIVERING":
                     dist_to_goal = math.sqrt((target_x - current_x)**2 + (target_y - current_y)**2)
-                    
-                    if dist_to_goal < 0.15: # Arrived at the 15cm basket!
-                        print("Arrived at target! Halting for dropoff.")
+                    if dist_to_goal < 0.15: 
                         stop_motors()
-                        
-                        # Drop the item in the basket
                         execute_dropoff_sequence()
-                        
-                        # Set target back to home and switch state
-                        target_x = start_x
-                        target_y = start_y
+                        target_x, target_y = start_x, start_y
                         navigation_state = "RETURNING"
-                        print(f"Dropoff complete. Returning to Home Base at X:{target_x:.2f}, Y:{target_y:.2f}")
-                        
+                        print(f"Returning to Home Base.")
                     else:
-                        # Keep driving via APF
                         local_x, local_y = calculate_local_apf_vector()
                         apply_motor_commands(local_x, local_y)
                 
-                # STATE 3: RETURNING (Driving Home)
                 elif navigation_state == "RETURNING":
-                    target_angle = start_angle # We want to face the line, to pick up the next item
+                    target_angle = start_angle 
                     dist_to_goal = math.sqrt((target_x - current_x)**2 + (target_y - current_y)**2)
-                    
-                    if dist_to_goal < 0.05: # Tolerance for the starting position
-                        print("Arrived back at Home Base. Ready for next item.")
+                    if dist_to_goal < 0.05: 
                         stop_motors()
-                        
-                        # Clear targets and wait for the next queue item
-                        target_x = None
-                        target_y = None
-                        target_angle = None
+                        target_x, target_y, target_angle = None, None, None
                         navigation_state = "IDLE"
-                        
+                        print("Arrived back at Home Base. Waiting in IDLE.")
                     else:
-                        # Keep driving via APF
                         local_x, local_y = calculate_local_apf_vector()
                         apply_motor_commands(local_x, local_y)
-            
             else:
-                # The game is paused or stopped by the referees
                 stop_motors()
                 
-            # Maintain a 20 Hz control loop
             time.sleep(0.05)
             
     except KeyboardInterrupt:
-        print("Manual shutdown triggered. Stopping motors.")
+        print("\nManual shutdown (Ctrl+C). Stopping motors immediately.")
         stop_motors()
 
-#if __name__ == "__main__":
-#    main()
-
-def start_websocket_listener():
-    """Runs the async websocket connection in a separate event loop."""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    # This function comes from the library you provided
-    loop.run_until_complete(comm.connect_and_listen_to_websocket())
-
 if __name__ == "__main__":
-    # Spin up the server listener in the background
-    listener_thread = threading.Thread(target=start_websocket_listener, daemon=True)
-    listener_thread.start()
-
-    # Spin the ROS 2 Node so LiDAR and Camera callbacks actually fire
+    # Spin the ROS 2 node in the background so LiDAR receives data!
     ros_spin_thread = threading.Thread(target=lambda: rclpy.spin(mirte.node), daemon=True)
     ros_spin_thread.start()
     
-    # Give the connection a brief second to establish before driving
     time.sleep(1) 
-    
-    # 2. Start the main navigation brain
     main()
