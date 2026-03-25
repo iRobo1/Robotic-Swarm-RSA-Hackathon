@@ -12,10 +12,10 @@ from library.detector import Detector
 from library.communication import Communication
 import library.utils as utils
 
+from rclpy.executors import MultiThreadedExecutor
+from threading import Thread
 
 ###### Setup ######
-rclpy.init()
-
 team_id, robot_id = utils.get_team_robot_id()
 password = utils.get_password()
 
@@ -69,33 +69,49 @@ def on_receive_custom(from_team_id, from_robot_id, internal_type, bytes):
         except Exception as e:
             print("Could not parse message")
 
-communication.register_callback_location(on_receive_location)
-communication.register_callback_start(on_receive_start)
-communication.register_callback_stop(on_receive_stop)
-communication.register_callback_objective(on_receive_objective)
-communication.register_callback_custom(on_receive_custom)
+def main():
+    rclpy.init()
+    communication.register_callback_location(on_receive_location)
+    communication.register_callback_start(on_receive_start)
+    communication.register_callback_stop(on_receive_stop)
+    communication.register_callback_objective(on_receive_objective)
+    communication.register_callback_custom(on_receive_custom)
 
 
-##### Main loop #####
-# Send a custom message to itself (internal type 99, contents is two 8-bit integers (BB): 123 and 45)
-# You should see the robot receive this message as well
-communication.send_custom_msg(team_id, robot_id, 99, struct.pack("<BB", 123, 45))
+    ##### Main loop #####
+    # Send a custom message to itself (internal type 99, contents is two 8-bit integers (BB): 123 and 45)
+    # You should see the robot receive this message as well
+    communication.send_custom_msg(team_id, robot_id, 99, struct.pack("<BB", 123, 45))
 
-# Drive forward for 2 seconds
-driving_time = 30.0
-speed = 100
-t_end = time.time() + driving_time
-while time.time() < t_end:
-    # Drive by specifying the speed of the left and right motor
-    robot.drive(speed, speed)
-    # For the MIRTE Master: robot.drive(linear_x, linear_y, angular_z), all in m/s
-    # Print the detected april tags
-    tags = detector.detect_objective_tags()
-    for tag in tags:
-        print(f"Tag {tag.tag_id}, within distance: {utils.is_tag_within_distance(tag)}")
+    executor = MultiThreadedExecutor()
+    executor.add_node(robot.node)
+    executor.add_node(detector.node)
 
+    spin_thread = Thread(target=lambda: executor.spin(), daemon=True)
+    spin_thread.start()
 
-##### Shutdown nicely #####
-robot.drive(0,0)
-time.sleep(0.5)
-rclpy.shutdown()
+    try:
+        robot.drive(0,0)
+        time.sleep(0.5)
+    except KeyboardInterrupt:
+        executor.shutdown()
+        spin_thread.join()
+        robot.node.destroy_node()
+        detector.node.destroy_node()
+        rclpy.shutdown()
+
+    # Drive forward for 2 seconds
+    # driving_time = 30.0
+    # speed = 100
+    # t_end = time.time() + driving_time
+    # while time.time() < t_end:
+    #     # Drive by specifying the speed of the left and right motor
+    #     robot.drive(speed, speed)
+    #     # For the MIRTE Master: robot.drive(linear_x, linear_y, angular_z), all in m/s
+    #     # Print the detected april tags
+    #     tags = detector.detect_objective_tags()
+    #     for tag in tags:
+    #         print(f"Tag {tag.tag_id}, within distance: {utils.is_tag_within_distance(tag)}")
+
+if __name__ == "__main__":
+    main()
