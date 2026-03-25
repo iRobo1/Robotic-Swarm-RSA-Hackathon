@@ -9,16 +9,19 @@ import cv2
 import numpy as np
 import threading
 
+import os
+
 class Detector:
     def __init__(self, is_mirte_master):
         self.bridge = CvBridge()
+        self.image_counter = 0
         self.april_tag_option = apriltag.DetectorOptions(families="tag36h11")
         self.april_tag_detector = apriltag.Detector(self.april_tag_option)
         self.latest_image = None
         self.topic = "/camera/color/image_raw" if is_mirte_master else "/video1/image_raw"
         self.node = Node("detector")
         self.img_subscriber = self.node.create_subscription(Image, self.topic, self._on_receive_image, 10)
-
+        os.makedirs("images", exist_ok=True)
         self._start_thread()
         
 
@@ -44,7 +47,7 @@ class Detector:
                 - Empty list if no image is available
         """
         if self.latest_image is None:
-            print("No image available")
+            # print("No image available")
             return []
 
         gray_img = cv2.cvtColor(self.latest_image, cv2.COLOR_RGB2GRAY)
@@ -65,6 +68,14 @@ class Detector:
         while rclpy.ok():
             rclpy.spin_once(self.node, timeout_sec=0)
 
-
+    
     def _on_receive_image(self, msg):
+        print("image has been received")
         self.latest_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8")
+        self.image_counter += 1
+
+        file_path = os.path.join("images", f"{self.image_counter}.png")
+        image_bgr = cv2.cvtColor(self.latest_image, cv2.COLOR_RGB2BGR)
+
+        cv2.imwrite(file_path, image_bgr)
+
