@@ -11,6 +11,7 @@ from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from builtin_interfaces.msg import Duration
 from rclpy.action import ActionClient
 from control_msgs.action import GripperCommand
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
 class Robot:
     def __init__(self):    
@@ -31,8 +32,14 @@ class Robot:
 
         self.node = Node(f"robot")
 
-        self.cmd_vel_pub = self.node.create_publisher(Twist, "/mirte_base_controller/cmd_vel", 10)
-        self.arm_pub = self.node.create_publisher(JointTrajectory, "/mirte_master_arm_controller/joint_trajectory", 10)
+        self.cmd_vel_pub = self.node.create_publisher(Twist,
+                                                      "/mirte_base_controller/cmd_vel",
+                                                      10,
+                                                      callback_group=MutuallyExclusiveCallbackGroup())
+        self.arm_pub = self.node.create_publisher(JointTrajectory,
+                                                  "/mirte_master_arm_controller/joint_trajectory",
+                                                  10,
+                                                  callback_group=MutuallyExclusiveCallbackGroup())
         self.gripper_client = ActionClient(self.node, GripperCommand, "/mirte_master_gripper_controller/gripper_cmd")
 
     def clamp_linear_speed(self, value, low, high):
@@ -40,8 +47,7 @@ class Robot:
             return 0.1
         else:
             return clamp(value, low, high)
-    
-    
+
     def drive_to(self, target_x, target_y, target_orientation):   
         msg = Twist()
         # go to target
