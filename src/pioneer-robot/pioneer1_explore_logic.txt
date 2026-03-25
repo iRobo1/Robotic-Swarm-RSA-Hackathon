@@ -1,0 +1,41 @@
+# Exploration logic for pioneers
+
+The map size is known beforehand, split it up into 4 vertical "sections"
+The extents of these can be tuned based on the position received from the 
+hackathon's server x1, x2, x3 etc
+In real life it's like 2 meters of width for each
+
+We know our positions and angle well from the hackathon's server
+They have written API functions for driving so the logic can be just calling this
+
+Since we get the positions and angles provided + some control to go to some
+coordinate, we do not need the sonar to detect the wall. We can exclusively
+use those for obstacles or 
+
+Two of the sections will be closer to the wall
+    Here we provide the robots waypoints in the sections
+    At every waypoint the robot stops
+    It scans different angles at that same spot by just turning in place
+        At every angle call the camera function they wrote
+        If both sonars return a distance over some threshold
+            Angle view for camera is free, no other enemy robots blocking the camera
+        Else stop for 1 second and check again
+        Once established that the camera FOV is clear, call the API function
+        that recognizes the apriltag if there is any in the view. If not,
+        move on to the next angle. If there is, send a broadcast that you found the object
+
+    If this has all been done, put your angle back to normal and move on to the next waypoints
+
+    Maybe keep count of the objects in the big mirte and let it store the locations where they were seen.
+    If the mirte master has 10 of them, it can broadcast to the small mirtes to go back to the home or we
+    just remove them from the field.
+
+    ELSE:
+        The mirte pioneers keep exploring but now follow the waypoints backwards to see if they missed anything
+
+
+Special strategy for the middle sections:
+    One starts with waypoints from the home position and does the same until it reaches the end
+    The other sprints to the last waypoint closer to the back wall, rotates and then follows them backwards
+    This way we divide and conquer the middle of the arena to see the waypoints faster
+
