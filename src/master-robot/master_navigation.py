@@ -5,12 +5,12 @@ import asyncio
 from big_mirte_library import Robot, Communication
 
 # Initialize the robot 
-mirte = Robot(team_id=5, authorization=None)
+mirte = Robot(team_id=5, authorization=None, dev_mode=TEST_MODE)
 comm = Communication()
 
 # --- STATE VARIABLES ---
-
-TEST_MODE_NO_CAMERA = True # Set to True for simulation without camera
+TEST_MODE = True
+TEST_MODE_NO_CAMERA = False # Set to True for simulation without camera
 current_x = 0.0
 current_y = 0.0
 current_angle = 0.0
@@ -51,10 +51,14 @@ def on_receive_location(x, y, angle, visible, last_seen):
     current_angle = angle
     is_visible = visible    # safe stop in case we lose vision of the robot
 
+    # Passing location data to the Robot class to keep its internal state updated
+    mirte.on_receive_location(x, y, angle, visible, last_seen)
+
 def on_receive_start():
     """Starts the robot's movement."""
     global is_moving_allowed
     is_moving_allowed = True
+    mirte.on_receive_start() 
     print("Competition Started! Moving allowed.")
 
 def on_receive_stop():
@@ -62,6 +66,7 @@ def on_receive_stop():
     global is_moving_allowed
     is_moving_allowed = False
     stop_motors()
+    mirte.on_receive_stop()
     print("STOP MESSAGE RECEIVED. Stop immediately.")
 
 def on_receive_objective(team_id, robot_id, tag_id, x, y, angle, visible, last_seen):
@@ -93,6 +98,10 @@ def get_lidar_repulsive_forces():
     angle_increment = (2 * math.pi) / num_points 
 
     for i, distance in enumerate(lidar_array):
+        # Ignore infinity and NaN values from empty space
+        if math.isinf(distance) or math.isnan(distance):
+            continue
+
         # 0.05 ignores junk data from inside the robot chassis
         if 0.05 < distance < D_OBSTACLE: 
             beam_angle = i * angle_increment
@@ -236,11 +245,21 @@ def execute_dropoff_sequence():
 def main():
     global target_x, target_y, target_angle, navigation_state, is_moving_allowed
     print("Mirte Master Navigation Initialized. Waiting for start message...")
+
+    # --- AUTOMATIC HARDWARE START ---
+    if TEST_MODE:
+        print("\n------TEST MODE ACTIVE-----")
+        print("Robot will start moving in 3 seconds...")
+        time.sleep(3) # 3seconds delay
+        
+        is_moving_allowed = True
+        mirte.on_receive_start() # Force the library into the STARTED state
+
+        # Inject a fake objective so the Master has somewhere to drive!
+        mirte.objective_queue.put({"x": 1.5, "y": 1.5}) 
+        print("Test objective position injected.\n")
     
     try:
-        if TEST_MODE_NO_CAMERA == True:
-            is_moving_allowed = True # Hardcoded for testing, delete after
-            mirte.objective_queue.put({"x": 2.0, "y": 0.0})
         while True:
             # Only execute movement logic if the competition is running
             if is_moving_allowed:
@@ -248,6 +267,7 @@ def main():
                 # SAFETY OVERRIDE: Can the camera see the Robot?
                 if not is_visible:
                     stop_motors()
+                    # Add moving the arm 
                     # We skip the rest of the loop until the camera sees us again
                     time.sleep(0.05)
                     continue
@@ -334,9 +354,13 @@ def start_websocket_listener():
     loop.run_until_complete(comm.connect_and_listen_to_websocket())
 
 if __name__ == "__main__":
-    # 1. Spin up the server listener in the background
+    # Spin up the server listener in the background
     listener_thread = threading.Thread(target=start_websocket_listener, daemon=True)
     listener_thread.start()
+
+    # Spin the ROS 2 Node so LiDAR and Camera callbacks actually fire
+    ros_spin_thread = threading.Thread(target=lambda: rclpy.spin(mirte.node), daemon=True)
+    ros_spin_thread.start()
     
     # Give the connection a brief second to establish before driving
     time.sleep(1) 
