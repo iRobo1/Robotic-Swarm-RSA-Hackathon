@@ -17,7 +17,7 @@ def set_motor_speed(mirte, left_motor_speed: int, right_motor_speed: int) -> Non
 
 def getDistances(mirte):
     return [mirte.getDistance("left"), mirte.getDistance("right")]
-    
+
     # ROS name for sonar sensors
     # distance/left
     # distance/right
@@ -25,6 +25,6 @@ def getDistances(mirte):
 # Take a picture with the robot's camera and return it
 def capture_RGB_image(mirte) -> Mat:
     NotImplemented
-
+    
     # ROS topic for camera frame:
     # /video1/image_raw/compressed
