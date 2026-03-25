@@ -92,8 +92,8 @@ def main():
 
     try:
         while rclpy.ok():
-            robot.drive(2,0)
-            time.sleep(0.5)
+            robot.drive(right_motor_speed=2, left_motor_speed=2)
+            time.sleep(3.0)
     except KeyboardInterrupt:
         pass
     finally:
