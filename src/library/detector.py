@@ -8,6 +8,9 @@ from cv_bridge import CvBridge
 import cv2
 import numpy as np
 import threading
+import library.utils as utils
+
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
 class Detector:
     def __init__(self, is_mirte_master):
@@ -17,10 +20,13 @@ class Detector:
         self.latest_image = None
         self.topic = "/camera/color/image_raw" if is_mirte_master else "/video1/image_raw"
         self.node = Node("detector")
-        self.img_subscriber = self.node.create_subscription(Image, self.topic, self._on_receive_image, 10)
+        self.img_subscriber = self.node.create_subscription(Image,
+                                                            self.topic,
+                                                            self._on_receive_image,
+                                                            10,
+                                                            callback_group=MutuallyExclusiveCallbackGroup())
 
-        self._start_thread()
-        
+        # self._start_thread()
 
     def detect_objective_tags(self):
         """
@@ -68,3 +74,7 @@ class Detector:
 
     def _on_receive_image(self, msg):
         self.latest_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8")
+        tags = self.detect_objective_tags()
+        if tags:
+            for tag in tags:
+                self.node.get_logger().info(f"Tag {tag.tag_id}, within distance: {utils.is_tag_within_distance(tag)}") # type: ignore
