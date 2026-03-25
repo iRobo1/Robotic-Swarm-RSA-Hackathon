@@ -52,3 +52,5 @@ Done with waypoints: Create a list of the waypoints but backwards and run the sa
 
 Done with exploration: Once the mirte master has seen 10 of our objectives then exploration is over so remove our robots
 or make them go to the home
+
+Emergency state: Battery low. Unclear if this can be obtained from the mirte internally but 
