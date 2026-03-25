@@ -98,11 +98,44 @@ communication.register_callback_custom(on_receive_custom)
 #     for tag in tags:
 #         print(f"Tag {tag.tag_id}, within distance: {utils.is_tag_within_distance(tag)}")
 
+### SETUP CODE HERE!!! ##### 
 
 ##### MAIN LOOP HERE!!! #####
+while True:
 
+    detected_tags = detector.detect_objective_tags()
+    if detected_tags != []:
+        print(detected_tags)
+    else:
+        pass
+    
 
+    # rclpy.spin_once(robot.node, timeout_sec=0.01)
 
+    # left = robot.get_range_left()
+    # right = robot.get_range_right()
+    # print(left, right)
+
+    # print(robot.range_left, robot.range_right)
+    # print()
+
+    # time.sleep(2)
+    # print("Rotate")
+    # robot.drive(50, -50)
+    # time.sleep(2)
+    # print("Stop")
+    # robot.drive(0, 0)
+    # time.sleep(2)
+    # print("Rotate other way")
+    # robot.drive(-50, 50)
+    # time.sleep(2)
+    # print("Stop")
+    # robot.drive(0, 0)
+
+    ### Do logic in here
+    if stopped:
+        break
+    
 ##### Shutdown nicely #####
 robot.drive(0,0)
 time.sleep(0.5)
