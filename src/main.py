@@ -91,9 +91,12 @@ def main():
     spin_thread.start()
 
     try:
-        robot.drive(0,0)
-        time.sleep(0.5)
+        while rclpy.ok():
+            robot.drive(2,0)
+            time.sleep(0.5)
     except KeyboardInterrupt:
+        pass
+    finally:
         executor.shutdown()
         spin_thread.join()
         robot.node.destroy_node()

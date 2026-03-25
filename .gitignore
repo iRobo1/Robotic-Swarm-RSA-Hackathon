@@ -1,2 +1,3 @@
 .vscode/
 client_lib/
+__pycache__/

@@ -75,6 +75,8 @@ class Detector:
     def _on_receive_image(self, msg):
         self.latest_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8")
         tags = self.detect_objective_tags()
-        if tags:
-            for tag in tags:
-                self.node.get_logger().info(f"Tag {tag.tag_id}, within distance: {utils.is_tag_within_distance(tag)}") # type: ignore
+
+        if not tags:
+            self.node.get_logger().info("No tags detected.")
+        for tag in tags:
+            self.node.get_logger().info(f"Tag {tag.tag_id}, within distance: {utils.is_tag_within_distance(tag)}") # type: ignore
