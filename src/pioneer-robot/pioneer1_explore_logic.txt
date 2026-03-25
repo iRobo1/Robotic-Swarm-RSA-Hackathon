@@ -39,3 +39,16 @@ Special strategy for the middle sections:
     The other sprints to the last waypoint closer to the back wall, rotates and then follows them backwards
     This way we divide and conquer the middle of the arena to see the waypoints faster
 
+#### FINITE STATE MACHINE
+
+State: stopped, started are from the hackathon server
+
+Moving to waypoint: Move towards a goal waypoint and while doing this check for obstacles with the sonar
+
+Scanning at waypoint: Here we give only angle commands and use the sonars to check if there is anything in the way of the camera FOV
+Repeat for multiple angles. If you recognize an objective and it is ours, broadcast it and send the current location to the mirte master
+
+Done with waypoints: Create a list of the waypoints but backwards and run the same behavior
+
+Done with exploration: Once the mirte master has seen 10 of our objectives then exploration is over so remove our robots
+or make them go to the home
