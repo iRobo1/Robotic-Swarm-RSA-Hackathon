@@ -226,7 +226,7 @@ class Robot:
             # anything between the values between 0.01 and 0.1 you just clamp up to 0.1
             linear_speed = self.clamp_linear_speed(self.kp_linear * distance, 0.0, self.max_linear_speed)
             angular_speed = clamp(self.kp_angular * error, -self.max_angular_speed, self.max_angular_speed)
-            
+
             if abs(error) > self.stop_driving_forward_angle:
                 linear_speed = 0.0
             elif abs(error) > self.slower_driving_forward_angle:
@@ -300,3 +300,37 @@ class Robot:
         }
         
         self.objective_queue.put(new_objective)
+
+
+    def orient_to(self, target_orientation):   
+        msg = Twist()
+        #     time.sleep(self.poll_freq)
+
+        # orient in the desired direction
+        while True:
+            rclpy.spin_once(self.node, timeout_sec=0)
+            self.wait_if_stopped()
+            
+            error = angle_difference(target_orientation, -self.robot_position["angle"])
+
+            angular_speed = clamp(error, -self.max_angular_speed, self.max_angular_speed)
+
+            if abs(error) < self.angular_threshold:
+                break
+            
+            # I did not test yet whether this works
+            if abs(error) < 0.1:
+                msg.angular.z = angular_speed
+            else:
+                msg.angular.z = clamp(error, -self.max_angular_speed, self.max_angular_speed)
+            
+            msg = Twist()
+            msg.angular.z = angular_speed
+            msg.linear.x = 0
+            msg.linear.y = 0
+            self.cmd_vel_pub.publish(msg)
+            time.sleep(self.poll_freq)
+        
+        msg = Twist()
+        self.cmd_vel_pub.publish(msg)
+        time.sleep(0.2)
