@@ -1,7 +1,7 @@
 # Arena related objects (baskets, obstacles, our robots, other robots, etc.)
 
-from utils import Position
-from robot import Robot, Team
+from src.utils import Position
+from src.robot import Robot, Team
 
 
 class Basket:
