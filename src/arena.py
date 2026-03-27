@@ -5,10 +5,10 @@ from src.robot import Robot, Team
 
 
 class Basket:
-    # angle denotes the direction the April Tag is facing
+    
     def __init__(self, pos: Position, angle: float, team: Team):
         self.pos = pos
-        self.angle = angle
+        self.angle = angle # angle denotes the direction the April Tag is facing
         self.team = team
         self.discovered = False # whether any team has scanned the basket's April Tag yet
         self.completed = False # whether our Gripper robot has dropped an item in the basket

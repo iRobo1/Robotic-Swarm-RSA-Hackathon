@@ -409,61 +409,69 @@ def sample_hsv_values(image_number: int = None):
 
     color_configs = [
         {
-            "name": "Pink",
+            "name": "Pink", # done
             "draw_color": (147, 20, 255),
             "ranges": [
-                (np.array([160, 20, 50]), np.array([170, 170, 255])),
-                (np.array([160, 20, 50]), np.array([180, 90, 255]))
+                (np.array([170, 89, 151]), np.array([179, 132, 196])),
+                (np.array([0, 74, 144]), np.array([12, 120, 222])),
+                (np.array([168, 93, 216]), np.array([179, 142, 246])),
+                (np.array([171, 78, 182]), np.array([179, 111, 234])),
+                (np.array([169, 111, 189]), np.array([178, 144, 223]))
             ]
         },
         {
-            "name": "Red",
+            "name": "Red", # done
             "draw_color": (0, 0, 255),
             "ranges": [
-                (np.array([0, 50, 50]), np.array([10, 255, 255])),
-                (np.array([170, 90, 50]), np.array([180, 255, 255]))
+                (np.array([0, 122, 150]), np.array([14, 167, 189])),
+                (np.array([177, 128, 180]), np.array([179, 155, 253])),
+                (np.array([0, 84, 216]), np.array([11, 152, 255])),
+                (np.array([0, 135, 188]), np.array([11, 165, 225])),
+                (np.array([0, 104, 175]), np.array([14, 141, 217]))
             ]
         },
         {
-            "name": "Green",
+            "name": "Green", # done
             "draw_color": (0, 255, 0),
-            "ranges": [(np.array([35, 40, 40]), np.array([85, 255, 255]))]
+            "ranges": [
+                (np.array([34, 70, 114]), np.array([59, 102, 157])),
+                (np.array([40, 46, 93]), np.array([61, 91, 131])),
+                (np.array([32, 36, 178]), np.array([55, 90, 209])),
+                (np.array([32, 48, 127]), np.array([59, 84, 158])),
+                (np.array([38, 35, 153]), np.array([61, 94, 180]))
+            ]
         },
         {
-            "name": "Blue",
+            "name": "Blue", # done
             "draw_color": (255, 0, 0),
-            "ranges": [(np.array([100, 50, 50]), np.array([140, 255, 255]))]
+            "ranges": [
+                (np.array([108, 53, 128]), np.array([119, 105, 184])),
+                (np.array([107, 47, 183]), np.array([115, 112, 243])),
+                (np.array([106, 21, 111]), np.array([135, 78, 161])),
+                (np.array([0, 15, 144]), np.array([11, 38, 163])),
+                (np.array([111, 9, 135]), np.array([178, 54, 190]))
+            ]
         },
         {
-            "name": "Yellow",
-            "draw_color": (255, 255, 0),
-            "ranges": [(np.array([20, 100, 100]), np.array([30, 255, 255]))]
-        },
-        {
-            "name": "floor",
+            "name": "Yellow", # done (but with only one photo!)
             "draw_color": (255, 255, 0),
             "ranges": [
-                        (np.array([9, 54, 212]), np.array([29, 84, 232])),
-                        (np.array([9, 87, 163]), np.array([25, 104, 183])),
-                        (np.array([9, 84, 184]), np.array([26, 112, 196])),
-                        (np.array([11, 46, 225]), np.array([31, 71, 250])),
-                        (np.array([11, 54, 184]), np.array([31, 84, 212])),
-                        (np.array([11, 66, 176]), np.array([21, 81, 191])),
-                        (np.array([11, 77, 189]), np.array([23, 89, 201])),
-                        (np.array([11, 79, 202]), np.array([25, 97, 229])),
-                        (np.array([11, 79, 161]), np.array([31, 99, 181])),
-                        (np.array([13, 31, 232]), np.array([31, 53, 255])),
-                        (np.array([13, 46, 245]), np.array([23, 59, 255])),
-                        (np.array([15, 41, 217]), np.array([29, 61, 229])),
-                        (np.array([15, 82, 225]), np.array([25, 92, 235])),
-                        (np.array([16, 49, 194]), np.array([31, 59, 214])),
-                        (np.array([19, 54, 181]), np.array([29, 64, 191])),
-                        (np.array([21, 51, 207]), np.array([31, 61, 217])),
-                        (np.array([22, 84, 176]), np.array([32, 94, 186])),
-                        (np.array([24, 51, 163]), np.array([34, 61, 173])),
-                        (np.array([26, 36, 235]), np.array([37, 51, 245])),
-                        (np.array([27, 18, 232]), np.array([37, 28, 242])),
-                        (np.array([30, 5, 230]), np.array([40, 15, 240]))
+                (np.array([26, 128, 244]), np.array([29, 146, 255])),
+                (np.array([21, 139, 194]), np.array([25, 158, 215])),
+                (np.array([26, 99, 241]), np.array([28, 129, 255])),
+                (np.array([23, 135, 216]), np.array([27, 155, 235])),
+                (np.array([25, 127, 230]), np.array([28, 150, 246]))
+            ]
+        },
+        {
+            "name": "floor", # done
+            "draw_color": (255, 255, 0),
+            "ranges": [
+                (np.array([9, 66, 174]), np.array([31, 103, 217])),
+                (np.array([11, 16, 219]), np.array([35, 73, 255])),
+                (np.array([13, 20, 184]), np.array([32, 71, 223])),
+                (np.array([12, 35, 144]), np.array([31, 109, 191])),
+                (np.array([7, 60, 211]), np.array([28, 101, 251]))
             ]
         }
     ]

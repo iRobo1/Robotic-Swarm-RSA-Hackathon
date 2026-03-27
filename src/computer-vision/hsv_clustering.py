@@ -1,8 +1,52 @@
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, DBSCAN
 from mpl_toolkits.mplot3d import Axes3D
+from sklearn.preprocessing import StandardScaler
+
+
+def process_hsv_clusters_robust(image, eps=3, min_samples=10, m_clusters=5):
+    """
+    Finds HSV ranges using DBSCAN to filter noise followed by K-Means 
+    for structured grouping.
+    """
+    # 1. Convert to HSV
+    hsv_img = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    pixels = hsv_img.reshape(-1, 3)
+
+    # 2. Downsample for performance (Optional but recommended for large images)
+    # We take unique colors to reduce the workload on DBSCAN
+    unique_colors = np.unique(pixels, axis=0)
+    #unique_colors = pixels
+
+    # 3. Use DBSCAN to identify dense "core" color regions
+    # eps: The maximum distance between two samples for one to be considered as in the neighborhood of the other.
+    # min_samples: The number of samples in a neighborhood for a point to be considered a core point.
+    db = DBSCAN(eps=eps, min_samples=min_samples).fit(unique_colors)
+    
+    # Filter out noise (DBSCAN labels noise as -1)
+    core_mask = db.labels_ != -1
+    filtered_hsv = unique_colors[core_mask]
+
+    if len(filtered_hsv) < m_clusters:
+        return filtered_hsv, [], "Not enough dense color clusters found."
+
+    # 4. Use K-Means on the "clean" data to get exactly M ranges
+    kmeans = KMeans(n_clusters=m_clusters, n_init=10, random_state=42)
+    labels = kmeans.fit_predict(filtered_hsv)
+    
+    # 5. Generate ranges (Min/Max per cluster)
+    hsv_ranges = []
+    for i in range(m_clusters):
+        cluster_points = filtered_hsv[labels == i]
+        if len(cluster_points) > 0:
+            lower_bound = np.min(cluster_points, axis=0)
+            upper_bound = np.max(cluster_points, axis=0)
+            hsv_ranges.append((lower_bound, upper_bound))
+        
+    return filtered_hsv, hsv_ranges, labels
+
 
 def process_hsv_clusters(image, n_min_occurrences, m_clusters):
     # 1. Convert to HSV
@@ -86,15 +130,27 @@ def visualize_hsv(filtered_hsv, labels, hsv_ranges):
 
 # --- Execution ---
 # Load an image
-img = cv2.imread('data/pioneer_images/raw/138.png') # Replace with your file
+img = cv2.imread('data/colours/floor.png') # Replace with your file
 if img is not None:
-    N = 50  # Minimum occurrences
+    N = 5  # Minimum occurrences or min samples in neighbourhood for DBSCAN
     M = 5   # Number of clusters
     
-    points, ranges, cluster_labels = process_hsv_clusters(img, N, M)
+    #points, ranges, cluster_labels = process_hsv_clusters(img, N, M)
+    points, ranges, cluster_labels = process_hsv_clusters_robust(image=img, min_samples=N, m_clusters=M)
     
-    print(f"Found {len(points)} unique HSV values occurring >= {N} times.")
-    for idx, (low, high) in enumerate(ranges):
-        print(f"Cluster {idx+1} Range: Lower{low} - Upper{high}")
-        
+    #print(f"Found {len(points)} unique HSV values occurring >= {N} times.")
+    #for idx, (low, high) in enumerate(ranges):
+    #    print(f"Cluster {idx+1} Range: Lower{low} - Upper{high}")
+
+    # Format the ranges into a list of strings
+    print("\n")
+    formatted_ranges = []
+    for low, high in ranges:
+        line = f"                (np.array([{low[0]}, {low[1]}, {low[2]}]), np.array([{high[0]}, {high[1]}, {high[2]}]))"
+        formatted_ranges.append(line)
+
+    # Join the lines and wrap in the "ranges" key format
+    output = '"ranges": [\n' + ",\n".join(formatted_ranges) + '\n            ]'
+
+    print(output)
     visualize_hsv(points, cluster_labels, ranges)
