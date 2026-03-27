@@ -72,6 +72,16 @@ initial_angle = 0.0
 is_start_captured = False # We'll use this to wait for the first camera frame
 
 
+# --- STUCK DETECTION & RECOVERY ---
+STUCK_DIST_THRESHOLD = 0.03  # If moved less than 3cm...
+STUCK_TIME_LIMIT = 5.0       # ...in 5 seconds, it is stuck.
+last_stuck_check_time = time.time()
+stuck_ref_x = 0.0
+stuck_ref_y = 0.0
+is_recovering = False
+
+
+# --- GLOBAL LIDAR DATA ---
 global_lidar_data = []
 
 # Global Timers for cleanly printing to the terminal
@@ -230,6 +240,55 @@ def calculate_local_apf_vector():
     
     return total_x, total_y
 
+def get_clearer_side_direction():
+    """Returns 1.0 for Left, -1.0 for Right based on LiDAR averages."""
+    global global_lidar_data
+    if not global_lidar_data:
+        return 1.0 # Default to left
+    
+    num_points = len(global_lidar_data)
+    angle_inc = (2 * math.pi) / num_points
+    
+    left_sum, right_sum = 0, 0
+    left_count, right_count = 0, 0
+
+    for i, dist in enumerate(global_lidar_data):
+        if math.isinf(dist) or math.isnan(dist): dist = 2.0 # Treat 'inf' as clear path
+        
+        # Calculate angle relative to front
+        ang = -math.pi + (i * angle_inc) + LIDAR_MOUNT_ANGLE
+        while ang > math.pi: ang -= 2 * math.pi
+        while ang < -math.pi: ang += 2 * math.pi
+        
+        # Left Sector (0 to 90 degrees)
+        if 0 < ang < (math.pi / 2):
+            left_sum += dist
+            left_count += 1
+        # Right Sector (-90 to 0 degrees)
+        elif -(math.pi / 2) < ang < 0:
+            right_sum += dist
+            right_count += 1
+            
+    avg_left = left_sum / left_count if left_count > 0 else 0
+    avg_right = right_sum / right_count if right_count > 0 else 0
+    
+    return 1.0 if avg_left >= avg_right else -1.0
+
+def execute_recovery_sequence():
+    """Strafes 10cm to the clearer side."""
+    print("LOCAL MINIMA DETECTED! Executing recovery side-step...")
+    direction = get_clearer_side_direction()
+    side_label = "LEFT" if direction > 0 else "RIGHT"
+    print(f"Strafing 10cm to the {side_label}...")
+    
+    # Mecanum strafe: linear_x=0, linear_y=speed, angular_z=0
+    # 0.2m/s for 0.5 seconds = 10cm
+    mirte.drive(0.0, 0.2 * direction, 0.0)
+    time.sleep(0.5)
+    stop_motors()
+    print("Recovery complete. Resuming navigation.")
+
+
 def calculate_angular_velocity():
     if target_angle is None:
         return 0.0
@@ -272,11 +331,62 @@ def simulate_camera_feedback(local_vx, local_vy, angular_vz, dt=0.05):
 # ==========================================
 def execute_pickup_sequence():
     print("Executing Pickup Sequence...")
-    time.sleep(2) 
+
+    print("Step 1: Opening gripper...")
+    mirte.open_gripper()
+    time.sleep(1)
+    
+    print("Step 2: Moving to vertical initial position...")
+    mirte.move_arm_to(0.0, 0.0, 0.0, 0.0, 1) 
+    time.sleep(2)
+
+    print("Step 3: Lowering arm...")
+    # adjust this depending on the height of object
+    mirte.move_arm_to(0.0, -0.2, 0.8, 0.0, 2.0) # shoulder_pan, shoulder_lift, elbow, wrist, duration
+    time.sleep(3)
+
+    print("Step 4: Reaching forward to object...")
+    # adjust this depending on the distance to object
+    mirte.move_arm_to(0.0, -0.8, 1.2, 0.0, 1)
+    time.sleep(2)
+
+    print("Step 5: Closing gripper...")
+    # adjust the effort depening on obj weight
+    mirte.close_gripper(max_effort=25.0) 
+    time.sleep(2)
+
+    print("Step 6: Lifting to secure position for transport...")
+    # adjust depending on actual safe position
+    mirte.move_arm_to(0.0, -0.2, 1.8, 0.0, 2)
+    time.sleep(3)
+
     print("Pickup complete!")
 
 def execute_dropoff_sequence():
     print("Executing Dropoff Sequence...")
+
+    print("Step 1: Extending arm to vertical position...")
+    mirte.move_arm_to(0.0, 0.0, 0.0, 0.0, 1)
+    time.sleep(2)
+
+    print("Step 2: Extending arm to drop position...")
+    # adjust depending on dist to basket and height
+    mirte.move_arm_to(0.0, -0.8, 1.2, 0.0, 2)
+    time.sleep(3)
+
+    print("Step 3: Opening gripper...")
+    mirte.open_gripper()
+    time.sleep(2)
+
+    print("Step 4: Retracting arm from object...")
+    # adjust 
+    mirte.move_arm_to(0.0, -0.2, 0.8, 0.0, 2)
+    time.sleep(3)
+
+    print("Step 5: Returning to safe navigation position...")
+    mirte.move_arm_to(0.0, -0.2, 1.8, 0.0, 2)
+    time.sleep(2)
+
     time.sleep(2) 
     print("Dropoff complete!")
 
@@ -285,6 +395,7 @@ def execute_dropoff_sequence():
 # ==========================================
 def main():
     global target_x, target_y, target_angle, navigation_state, is_moving_allowed   
+    global stuck_ref_x, stuck_ref_y, last_stuck_check_time
     
     # START THE ROS ENGINE IMMEDIATELY
     executor = MultiThreadedExecutor()
@@ -296,29 +407,56 @@ def main():
     print("Waiting for initial camera detection...")
     while not is_start_captured:
         time.sleep(0.1)
-    print(f"Succesfull, Robot located at Global X:{current_x:.2f}, Y:{current_y:.2f}")
+    print(f"Succesfull location, Robot located at Global X:{current_x:.2f}, Y:{current_y:.2f}")
+
+    # Initialize the stuck detection reference point 
+    stuck_ref_x = current_x
+    stuck_ref_y = current_y
+    last_stuck_check_time = time.time()
+
 
     # 2. TARGET & START OVERRIDE (Hardcoded for testing)
     objective_queue.put({"x": 1.5, "y": 1.5, "tag_id": 99}) 
-    is_moving_allowed = True # <--- MANUAL START FOR TESTING
+    is_moving_allowed = True # MANUAL START FOR TESTING --> CHANGE IN THE COMPETITION 
 
     try:    
         while rclpy.ok():
-            if is_moving_allowed:
-                if not is_visible:
-                    stop_motors()
-                    time.sleep(0.1)
-                    continue
+            current_time = time.time()
 
+            if is_moving_allowed and is_visible:
+                # --- STUCK DETECTION ---
+                if navigation_state in ["DELIVERING", "RETURNING"]:
+                    if current_time - last_stuck_check_time > STUCK_TIME_LIMIT:
+                        move_dist = math.sqrt((current_x - stuck_ref_x)**2 + (current_y - stuck_ref_y)**2) # Euclidean Distance
+                        
+                        # If we haven't moved enough (under threshold), we are stuck
+                        if move_dist < STUCK_DIST_THRESHOLD:
+                            execute_recovery_sequence()
+                            # Reset timer after recovery
+                            stuck_ref_x = current_x
+                            stuck_ref_y = current_y
+                            last_stuck_check_time = current_time
+
+                        else:
+                            # We moved! Update reference for next check
+                            stuck_ref_x = current_x
+                            stuck_ref_y = current_y
+                            last_stuck_check_time = current_time
+
+                # --- IDLE STATE ---
                 if navigation_state == "IDLE":
                     if not objective_queue.empty():
                         execute_pickup_sequence()
+                        # Next objective
                         next_objective = objective_queue.get() 
                         target_x = next_objective["x"]
                         target_y = next_objective["y"]
                         navigation_state = "DELIVERING"
-                        print(f"🚀 Navigating to X:{target_x:.2f}, Y:{target_y:.2f}")
-
+                        # Reset stuck timer for the new goal
+                        stuck_ref_x, stuck_ref_y = current_x, current_y
+                        last_stuck_check_time = time.time()
+                        print(f"Navigating to X:{target_x:.2f}, Y:{target_y:.2f}")
+                    
                 elif navigation_state == "DELIVERING":
                     dist_to_goal = math.sqrt((target_x - current_x)**2 + (target_y - current_y)**2)
                     
@@ -327,7 +465,7 @@ def main():
                         print("Arrived at Global Target!")
                         execute_dropoff_sequence()
                         
-                        # --- CHANGE: Return to the initial snapshot (for testing, after: hardcode this) ---
+                        # --- CHANGE: Return to the initial snapshot (for competition: hardcode the position it needs to go to) ---
                         target_x, target_y = initial_x, initial_y
                         navigation_state = "RETURNING"
                         print(f"Returning to Start: X:{target_x:.2f}, Y:{target_y:.2f}")
@@ -344,11 +482,12 @@ def main():
                     else:
                         local_x, local_y = calculate_local_apf_vector()
                         apply_motor_commands(local_x, local_y)
-            else:
+                   
+            elif not is_visible:
                 stop_motors()
-            
+
             time.sleep(0.05)
-            
+        
     except KeyboardInterrupt:
         print("\nManual shutdown. Stopping.")
         stop_motors()
