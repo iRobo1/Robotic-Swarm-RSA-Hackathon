@@ -8,6 +8,7 @@ import rclpy
 from sensor_msgs.msg import LaserScan
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from sensor_msgs.msg import Range
 
 # --- FOLDER ROUTING ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -56,15 +57,6 @@ target_x, target_y, target_angle = None, None, None
 start_x, start_y, start_angle = 0.5, 1.0, 0.0   
 navigation_state = "IDLE" 
 
-# APF Tuning Parameters
-K_ATT = 1.0       
-K_REP = 0.5       
-D_OBSTACLE = 0.4
-MAX_SPEED = 0.4   
-ROBOT_RADIUS = 0.15     
-LIDAR_OFFSET_X = 0.10   
-LIDAR_MOUNT_ANGLE = math.pi / 2  # 90 degrees
-
 # --- STARTING SNAPSHOT ---
 initial_x = 0.0
 initial_y = 0.0
@@ -81,13 +73,28 @@ stuck_ref_y = 0.0
 is_recovering = False
 
 
-# --- GLOBAL LIDAR DATA ---
+# --- LIDAR DATA ---
+# APF Tuning Parameters
+K_ATT = 1.0       
+K_REP = 0.5       
+D_OBSTACLE = 0.4
+MAX_SPEED = 0.4   
+ROBOT_RADIUS = 0.20     
+
 global_lidar_data = []
+LIDAR_OFFSET_X = 0.10   
+LIDAR_MOUNT_ANGLE = math.pi / 2  # 90 degrees
+
 
 # Global Timers for cleanly printing to the terminal
 last_lidar_print = 0.0
 last_debug_time = 0.0
 
+# --- IR Sensor Data ---
+ir_left_dist = 1.0  # hardcoded 1m distance
+ir_right_dist = 1.0
+IR_THRESHOLD = 0.12 # The zone where IR takes over 
+K_IR_REP = 2.5 # High gain to ensure this overrides the attractive force
 
 
 # ==========================================
@@ -103,7 +110,7 @@ def on_receive_location(x, y, angle, visible, last_seen):
             initial_y = y
             initial_angle = angle
             is_start_captured = True
-            print(f"📍 Initial Global POS Captured: X:{x:.2f}, Y:{y:.2f}")
+            print(f"Initial Global POS Captured: X:{x:.2f}, Y:{y:.2f}")
 
         # RAW GLOBAL values for navigation
         current_x = x
@@ -132,6 +139,14 @@ def on_receive_objective(team_id, robot_id, tag_id, x, y, angle, visible, last_s
 def on_receive_lidar(msg):
     global global_lidar_data, last_lidar_print
     global_lidar_data = list(msg.ranges)
+
+def on_receive_ir_left(msg):
+    global ir_left_dist
+    ir_left_dist = msg.range
+
+def on_receive_ir_right(msg):
+    global ir_right_dist
+    ir_right_dist = msg.range
 
 
 comm.register_callback_location(on_receive_location)
@@ -204,14 +219,17 @@ def calculate_local_apf_vector():
     att_force_local_x = K_ATT * dist_to_goal * math.cos(local_angle_to_goal)
     att_force_local_y = K_ATT * dist_to_goal * math.sin(local_angle_to_goal)
     
-    rep_force_local_x, rep_force_local_y = get_lidar_repulsive_forces()
+    # LiDAR repulsion (Long-range)
+    rep_lidar_x, rep_lidar_y = get_lidar_repulsive_forces()
+    
+    # IR repulsion (Short-range/Safety)
+    rep_ir_x, rep_ir_y = get_ir_repulsive_vector()
 
-    total_x = att_force_local_x + rep_force_local_x
-    total_y = att_force_local_y + rep_force_local_y
+    # Calculating total force
+    total_x = att_force_local_x + rep_lidar_x + rep_ir_x
+    total_y = att_force_local_y + rep_lidar_y + rep_ir_y
 
-    # ==========================================
-    # DEBUGGING DASHBOARD
-    # ==========================================
+    # --- DEBUGGING DASHBOARD
     current_time = time.time()
     if current_time - last_debug_time > 0.5:
         closest_obs_dist = 999.0
@@ -233,12 +251,58 @@ def calculate_local_apf_vector():
         print(f"\n--- [{navigation_state}] ---")
         print(f"POS:  X:{current_x:.2f}  Y:{current_y:.2f}  |  TGT: X:{target_x:.2f}  Y:{target_y:.2f}  |  DIST: {dist_to_goal:.2f}m")
         print(f"ATT:  x:{att_force_local_x:>5.2f}  y:{att_force_local_y:>5.2f}")
-        print(f"REP:  x:{rep_force_local_x:>5.2f}  y:{rep_force_local_y:>5.2f}")
+        print(f"REP LIDAR:  x:{rep_lidar_x:>5.2f}  y:{rep_lidar_y:>5.2f}")
+        print(f"REP IR:  x:{rep_ir_x:>5.2f}  y:{rep_ir_y:>5.2f}")
         print(f"OUT:  x:{total_x:>5.2f}  y:{total_y:>5.2f}")
         print(f"CLOSEST VALID OBSTACLE: {obs_string}")
         last_debug_time = current_time
     
     return total_x, total_y
+
+
+# ==========================================
+# IR SENSORS
+# ==========================================
+
+def is_obstacle_too_close(threshold):
+    """
+    Returns True if an object is detected within 'threshold' meters.
+    Default threshold is 10cm.
+    """
+    global ir_left_dist, ir_right_dist
+    
+    # Check if either sensor is below the safety limit
+    if ir_left_dist < threshold or ir_right_dist < threshold:
+        # Optional: Print which side triggered it for debugging
+        side = "LEFT" if ir_left_dist < threshold else "RIGHT"
+        # print(f"IR WARNING: Object detected on {side} side!")
+        return True
+        
+    return False
+
+def get_ir_repulsive_vector():
+    """Calculates a high-gain repulsive vector for the 0-15cm range."""
+    global ir_left_dist, ir_right_dist, IR_THRESHOLD, K_IR_REP
+    push_x, push_y = 0.0, 0.0 
+
+    # Left Sensor (pointing roughly 45 degrees left)
+    if ir_left_dist < IR_THRESHOLD:
+        # Calculate how 'deep' into the danger zone we are
+        force_mag = K_IR_REP * (IR_THRESHOLD - ir_left_dist)
+        push_x -= force_mag * 0.707  # Push Back
+        push_y -= force_mag * 0.707  # Push Right
+
+    # Right Sensor (pointing roughly 45 degrees right)
+    if ir_right_dist < IR_THRESHOLD:
+        force_mag = K_IR_REP * (IR_THRESHOLD - ir_right_dist)
+        push_x -= force_mag * 0.707  # Push Back
+        push_y += force_mag * 0.707  # Push Left
+
+    return push_x, push_y
+
+# ==========================================
+# OTHERS
+# ==========================================
 
 def get_clearer_side_direction():
     """Returns 1.0 for Left, -1.0 for Right based on LiDAR averages."""
@@ -403,6 +467,10 @@ def main():
     ros_spin_thread = threading.Thread(target=lambda: executor.spin(), daemon=True)
     ros_spin_thread.start()
 
+    # IR Sensor Subscriptions
+    mirte.node.create_subscription(Range, "/mirte/ir_left", on_receive_ir_left, 10)
+    mirte.node.create_subscription(Range, "/mirte/ir_right", on_receive_ir_right, 10)
+
     # 1. WAIT FOR CAMERA CALIBRATION
     print("Waiting for initial camera detection...")
     while not is_start_captured:
@@ -465,7 +533,7 @@ def main():
                         print("Arrived at Global Target!")
                         execute_dropoff_sequence()
                         
-                        # --- CHANGE: Return to the initial snapshot (for competition: hardcode the position it needs to go to) ---
+                        # --- CHANGE FOR COMPETITION: Return to the initial snapshot (for competition: hardcode the position it needs to go to) ---
                         target_x, target_y = initial_x, initial_y
                         navigation_state = "RETURNING"
                         print(f"Returning to Start: X:{target_x:.2f}, Y:{target_y:.2f}")
