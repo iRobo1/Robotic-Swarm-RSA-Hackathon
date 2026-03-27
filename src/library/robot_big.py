@@ -115,15 +115,20 @@ class Robot:
         # -2.5 to 2.5
         point = JointTrajectoryPoint()
         point.positions = [shoulder_rotate, shoulder_lift, elbow_joint, wrist_joint] 
-        point.time_from_start = Duration(sec=movement_duration)  
+        point.time_from_start = Duration(sec=int(movement_duration))  
 
         msg.points = [point]
         self.arm_pub.publish(msg)
     
-    def open_gripper(self, max_effort=10.0):
+    def open_gripper(self, max_effort=20.0):
         # max is 0.5 (closed) and (-0.5) open
-        position = 0.5
-        self.gripper_client.wait_for_server()
+        position = -0.5
+        print(f"Opening gripper (target: {position})...")
+
+        if not self.gripper_client.wait_for_server(timeout_sec=1.0):
+            print("Gripper Action Server not found!")
+            return
+        
 
         goal = GripperCommand.Goal()
         # if you want the gripper open put on -0.5 and if you want it closed put on 0.5?
@@ -132,13 +137,22 @@ class Robot:
         goal.command.max_effort = max_effort
 
         future = self.gripper_client.send_goal_async(goal)
-        rclpy.spin_until_future_complete(self.node, future)
+
+        while rclpy.ok() and not future.done():
+            time.sleep(0.1)
+        print("Gripper command sent.")
+
+        # rclpy.spin_until_future_complete(self.node, future)
 
     # max effor of 10 holds the items but maybe more needed
-    def close_gripper(self, max_effort=10.0):
+    def close_gripper(self, max_effort=20.0):
         # max is 0.5 (closed) and (-0.7) open
-        self.gripper_client.wait_for_server()
-        position= -0.5
+        position= 0.5
+        print(f"Closing gripper (target: {position})...")
+
+        if not self.gripper_client.wait_for_server(timeout_sec=1.0):
+            print("Gripper Action Server not found!")
+            return
 
         goal = GripperCommand.Goal()
         # if you want the gripper open put on -0.5 and if you want it closed put on 0.5?
@@ -147,4 +161,9 @@ class Robot:
         goal.command.max_effort = max_effort
 
         future = self.gripper_client.send_goal_async(goal)
-        rclpy.spin_until_future_complete(self.node, future)
+
+        while rclpy.ok() and not future.done():
+            time.sleep(0.1)
+        print("Gripper command sent.")
+        
+        #rclpy.spin_until_future_complete(self.node, future)
