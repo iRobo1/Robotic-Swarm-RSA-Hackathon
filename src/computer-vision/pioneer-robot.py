@@ -1,19 +1,20 @@
 from src.arena import Basket
 from src.utils import Position
-import cv2
+import cv2 as cv
 import os
 import re
 import time
 import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+import random
 
 # This computer vision code must run relatively quickly, taking less than 100 ms to process.
 
 # Returns a list of tuples containing a basket and the robot's relative angle to it
-def find_visible_baskets_in_image(img: cv2.Mat) -> list[tuple[Basket, float]]:
+def find_visible_baskets_in_image(img: cv.Mat) -> list[tuple[Basket, float]]:
     NotImplemented
 
-
-import cv2
 import numpy as np
 
 # Computer vision tasks
@@ -64,26 +65,160 @@ import numpy as np
 # still doesn't identify walls!
 # nor other robots!
 
+# instead of exclusive masks that don't overlap, let them overlap (e.g., pink and red). Then pick the colour based on the median/average pixel colour.
+
+# using bilateral filter size 5 might work to make the colour inside the blobs uniform-ish, but it might be slow. Perhaps just Gaussian blur
+# the image to reduce noise? Perhaps noise doesn't need to be removed. Try ignoring it.
+# Find the average HSV of various regions in the image and better pick the HSV ranges.
+
+def save_test_image(img: cv.Mat, filename: str):
+    # Save to the test folder
+    output_dir = 'data/test_outputs/'
+    save_path = os.path.join(output_dir, filename)
+    cv.imwrite(save_path, img)
+
+
+# Annotates an image by adding text in the top left on the given row
+def annotate_image(img: cv.Mat, text: str, row: int) -> cv.Mat:
+    font = cv.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.5 
+    thickness = 1
+    color = (0, 0, 0)
+
+    # Define the starting position (Top Left)
+    x = 10  # Horizontal padding from the left edge
+    
+    # Calculate vertical position:
+    # We start at 20px for row 0, then add 20px for each subsequent row
+    line_height = 20 
+    y = 20 + (row * line_height)
+
+    # Put the text on the image
+    img_annotated = cv.putText(img, text, (x, y), font, font_scale, color, thickness, cv.LINE_AA)
+    
+    return img_annotated
+
+# larger number = sharper image. However, boring scenes will get low numbers, even if they are sharp. So use with care
+# A number above ~80 is certainly a relatively sharp image. But a low number (e.g., 20) does not necessarily indicate a blurry image.
+def calculate_blur_coefficient(img: cv.Mat) -> float:
+    # load the image, convert it to grayscale, and compute the
+    # focus measure of the image using the Variance of Laplacian method
+    gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+    fm = cv.Laplacian(gray, cv.CV_64F).var()
+    return fm
+
+
+
+def plot_hsv_space(hsv_image):
+    """
+    Takes an HSV image and plots its pixels as 3D coordinates.
+    """
+    # 1. Downsample for performance (optional but recommended)
+    # Reducing the image size makes the 3D plot much more responsive.
+    #scale_percent = 0.1  # Use 10% of the original pixels
+    #width = int(hsv_image.shape[1] * scale_percent)
+    #height = int(hsv_image.shape[0] * scale_percent)
+    #small_hsv = cv.resize(hsv_image, (width, height), interpolation=cv.INTER_AREA)
+    small_hsv = hsv_image
+
+    # 2. Reshape the image to a list of pixels
+    # Each pixel becomes a row with three columns: [H, S, V]
+    pixel_colors = small_hsv.reshape((-1, 3))
+
+    # 3. Prepare coordinates
+    # In OpenCV HSV: H is 0-179, S is 0-255, V is 0-255
+    h = pixel_colors[:, 0]
+    s = pixel_colors[:, 1]
+    v = pixel_colors[:, 2]
+
+    # 4. Prepare actual RGB colors for the plot points
+    # We want the color of the dot to match the actual color of the pixel
+    rgb_image = cv.cvtColor(small_hsv, cv.COLOR_HSV2RGB)
+    rgb_colors = rgb_image.reshape((-1, 3)) / 255.0  # Normalize to [0, 1] for Matplotlib
+
+    # 5. Create the 3D Plot
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111, projection='3d')
+
+    ax.scatter(h, s, v, c=rgb_colors, marker='o', s=1, alpha=0.5)
+
+    # Labeling the axes
+    ax.set_xlabel('Hue (0-179)')
+    ax.set_ylabel('Saturation (0-255)')
+    ax.set_zlabel('Value (0-255)')
+    ax.set_title('Image Pixels in HSV Space')
+
+    plt.show()
+
+
+
+
 def process_blobs_refined(img):
     # Standard dimensions
     IMG_WIDTH = 640
     IMG_HEIGHT = 480
     TARGET_Y = 200
 
-    # 1. Handle horizontal blur
-    kernel_sharpen = np.array([[-1, 5, -1]]) / 3.0
-    img_filtered = cv2.filter2D(img, -1, kernel_sharpen)
+    save_test_image(img, "1original_image.png")
+
+    blur = calculate_blur_coefficient(img)
+
+    img = annotate_image(img, "hi", 0)
+    img = annotate_image(img, "world", 1)
+    img = annotate_image(img, f"blur: {blur}", 2)
+
+    save_test_image(img, "1annotated_image.png")
+
+    print("blur value:", blur)
+
+
+    # 1. Handle horizontal blur (does like nothing)
+    #kernel_sharpen = np.array([[-1, 5, -1]]) / 3.0
+    #img_filtered = cv.filter2D(img, -1, kernel_sharpen)
+    # SAVE: Filtered Image
+    #save_test_image(img_filtered, "2filtered_image.png")
     
     # 2. Convert to HSV
-    hsv = cv2.cvtColor(img_filtered, cv2.COLOR_BGR2HSV)
+    hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
+    # SAVE: HSV Image (Note: looks weird in BGR space, but useful for debugging)
+    save_test_image(hsv, "3hsv_image.png")
     
     # 3. Define Color Ranges and their BGR display colors
     # Format: (name, lower_hsv, upper_hsv, bgr_draw_color)
+    # 3. Define Color Configurations
+    # Metadata is stored once, with one or more HSV ranges per color
     color_configs = [
-        ("Red/Pink", np.array([0, 50, 50]), np.array([10, 255, 255]), (0, 0, 255)),
-        ("Red/Pink", np.array([160, 50, 50]), np.array([180, 255, 255]), (0, 0, 255)),
-        ("Green", np.array([35, 40, 40]), np.array([85, 255, 255]), (0, 255, 0)),
-        ("Blue", np.array([100, 50, 50]), np.array([140, 255, 255]), (255, 0, 0))
+        {
+            "name": "Pink",
+            "draw_color": (147, 20, 255),
+            "ranges": [
+                (np.array([160, 20, 50]), np.array([170, 170, 255])),
+                (np.array([160, 20, 50]), np.array([180, 90, 255]))
+            ]
+        },
+        {
+            "name": "Red",
+            "draw_color": (0, 0, 255),
+            "ranges": [
+                (np.array([0, 50, 50]), np.array([10, 255, 255])),
+                (np.array([170, 90, 50]), np.array([180, 255, 255]))
+            ]
+        },
+        {
+            "name": "Green",
+            "draw_color": (0, 255, 0),
+            "ranges": [(np.array([35, 40, 40]), np.array([85, 255, 255]))]
+        },
+        {
+            "name": "Blue",
+            "draw_color": (255, 0, 0),
+            "ranges": [(np.array([100, 50, 50]), np.array([140, 255, 255]))]
+        },
+        {
+            "name": "Yellow",
+            "draw_color": (255, 255, 0),
+            "ranges": [(np.array([20, 100, 100]), np.array([30, 255, 255]))] # Fixed overlapping Blue values
+        }
     ]
 
     # Wood color range (converted roughly to HSV for more robust checking)
@@ -91,17 +226,40 @@ def process_blobs_refined(img):
     lower_wood = np.array([10, 30, 130])
     upper_wood = np.array([30, 150, 255])
 
-    for name, lower, upper, draw_color in color_configs:
-        mask = cv2.inRange(hsv, lower, upper)
+    for config in color_configs:
+        name = config["name"]
+        draw_color = config["draw_color"]
         
+        # Initialize an empty mask for the current color
+        # hsv.shape[:2] gives us (height, width)
+        mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
+        
+        for (lower, upper) in config["ranges"]:
+            range_mask = cv.inRange(hsv, lower, upper)
+            # Combine ranges using bitwise OR
+            mask = cv.bitwise_or(mask, range_mask)
+        
+        # SAVE: The combined mask for this specific color
+        save_test_image(mask, f"4mask_{name.lower()}.png")
+
         # Vertical opening to help with sharp top/bottom edges
         kernel = np.ones((5, 1), np.uint8)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel)
 
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # SAVE: The combined mask for this specific color
+        save_test_image(mask, f"5mask_with_morph_{name.lower()}.png")
+
+        contours, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+
+        # SAVE: Visualization of contours for this color
+        contour_img = np.zeros((IMG_HEIGHT, IMG_WIDTH, 3), dtype=np.uint8)
+        cv.drawContours(contour_img, contours, -1, draw_color, 2)
+        save_test_image(contour_img, f"6contours_{name.lower()}.png")
 
         for cnt in contours:
-            x, y, w, h = cv2.boundingRect(cnt)
+            x, y, w, h = cv.boundingRect(cnt)
+
+            cv.rectangle(img, (x, y), (x + w, y + h), draw_color, 1)
             
             # Initial filter: must cross Y=200
             if not (y <= TARGET_Y <= (y + h)):
@@ -146,21 +304,24 @@ def process_blobs_refined(img):
             # Ensure we stay within image bounds
             if wood_y_end < IMG_HEIGHT:
                 wood_roi_hsv = hsv[wood_y_start:wood_y_end, new_x:new_x + new_w]
-                wood_mask = cv2.inRange(wood_roi_hsv, lower_wood, upper_wood)
+                wood_mask = cv.inRange(wood_roi_hsv, lower_wood, upper_wood)
+                save_test_image(wood_mask, f"7mask_wood_{name.lower()}.png")
                 
                 # Check if average pixel satisfies "wood" (more than 50% of ROI)
                 if np.mean(wood_mask) > 127.5:
                     # Draw Bounding Box
-                    cv2.rectangle(img, (new_x, new_y), (new_x + new_w, new_y + new_h), draw_color, 1)
+                    cv.rectangle(img, (new_x, new_y), (new_x + new_w, new_y + new_h), draw_color, 1)
                     
                     # Draw Black vertical lines inside the boundary
                     # Left vertical line
-                    cv2.line(img, (new_x + 1, new_y), (new_x + 1, new_y + new_h), (0, 0, 0), 1)
+                    cv.line(img, (new_x + 1, new_y), (new_x + 1, new_y + new_h), (0, 0, 0), 1)
                     # Right vertical line
-                    cv2.line(img, (new_x + new_w - 1, new_y), (new_x + new_w - 1, new_y + new_h), (0, 0, 0), 1)
+                    cv.line(img, (new_x + new_w - 1, new_y), (new_x + new_w - 1, new_y + new_h), (0, 0, 0), 1)
 
     # Final requirement: Add the red horizontal line at height 200
-    cv2.line(img, (0, TARGET_Y), (IMG_WIDTH, TARGET_Y), (0, 0, 255), 1)
+    cv.line(img, (0, TARGET_Y), (IMG_WIDTH, TARGET_Y), (0, 0, 255), 1)
+
+    save_test_image(img, f"8final_image_{name.lower()}.png")
 
     return img
 
@@ -170,10 +331,10 @@ def process_blobs(img):
     # 1. Handle horizontal blur by slightly sharpening or using a vertical kernel
     # Since the blur is horizontal, a 3x1 or 5x1 kernel can help define edges
     kernel_sharpen = np.array([[-1, 5, -1]]) / 3.0
-    img_filtered = cv2.filter2D(img, -1, kernel_sharpen)
+    img_filtered = cv.filter2D(img, -1, kernel_sharpen)
     
     # 2. Convert to HSV for better color segmentation
-    hsv = cv2.cvtColor(img_filtered, cv2.COLOR_BGR2HSV)
+    hsv = cv.cvtColor(img_filtered, cv.COLOR_BGR2HSV)
     
     # 3. Define Color Ranges (Hue ranges: Green ~35-85, Blue ~100-130, Red ~0-10 & 170-180)
     # Note: These ranges cover Red, Pink, Blue, and Green generally.
@@ -193,19 +354,19 @@ def process_blobs(img):
     # Combine masks
     full_mask = np.zeros(img.shape[:2], dtype=np.uint8)
     for l, u in zip(lower_colors, upper_colors):
-        mask = cv2.inRange(hsv, l, u)
-        full_mask = cv2.bitwise_or(full_mask, mask)
+        mask = cv.inRange(hsv, l, u)
+        full_mask = cv.bitwise_or(full_mask, mask)
 
     # 4. Clean up the mask
     # We use a vertical opening to favor sharp top/bottom edges and filter noise
     kernel = np.ones((5, 2), np.uint8)
-    full_mask = cv2.morphologyEx(full_mask, cv2.MORPH_OPEN, kernel)
+    full_mask = cv.morphologyEx(full_mask, cv.MORPH_OPEN, kernel)
 
     # 5. Find and Filter Contours
-    contours, _ = cv2.findContours(full_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv.findContours(full_mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
     
     for cnt in contours:
-        x, y, w, h = cv2.boundingRect(cnt)
+        x, y, w, h = cv.boundingRect(cnt)
         
         # Requirement: at least 25px high and 10px wide
         if h >= 25 and w >= 10:
@@ -213,59 +374,22 @@ def process_blobs(img):
             # (Blob must span across the y=200 line)
             if y <= 200 <= (y + h):
                 # Draw the 1-pixel rectangle
-                cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 1)
+                cv.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 1)
 
     # 6. Add the 1-pixel high red horizontal line at height 200
     # BGR for Red is (0, 0, 255)
-    cv2.line(img, (0, 200), (640, 200), (0, 0, 255), 1)
+    cv.line(img, (0, 200), (640, 200), (0, 0, 255), 1)
 
     return img
 
 
 
-def annotate_image(img: cv2.Mat) -> cv2.Mat:
-    # Text parameters
-    text = "Hi World, d=11"
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = 0.5  # Approx 11px height
-    thickness = 1
-    color = (0, 0, 0)  # White
 
-    # Get text size to center it perfectly
-    # (width, height), baseline
-    (text_width, text_height), _ = cv2.getTextSize(text, font, font_scale, thickness)
-
-    # Calculate coordinates for the middle of a 640x480 image
-    # Middle is (320, 240). Offset by half the text size.
-    x = (img.shape[1] - text_width) // 2
-    y = (img.shape[0] + text_height) // 2
-
-    # Put the text on the image
-    img_annotated = cv2.putText(img, text, (x, y), font, font_scale, color, thickness, cv2.LINE_AA)
-    return img_annotated
-
-
-def process_image(img: cv2.Mat) -> cv2.Mat:
-    #img_annotated = annotate_image(img)
-
-    #processed_img = process_blobs(img)
-    processed_img = process_blobs_refined(img)
-    return processed_img
-
-
-# objects of similar colour
-# at least 25 pixels high
-#
-
-
-# Testing function. Loads images from data/ and processes them.
-# You can run this with:
-# py -m src.computer-vision.pioneer-robot
-def test_vision():
-    print("Testing Computer Vision")
-
+def sample_hsv_values(image_number: int = None):
     input_dir = 'data/pioneer_images/raw'
     output_dir = 'data/pioneer_images/annotated/'
+    #input_dir = 'data/gripper_images/raw'
+    #output_dir = 'data/gripper_images/annotated/'
 
     # List all files in the raw directory
     files = [f for f in os.listdir(input_dir) if f.lower().endswith('.png')]
@@ -276,11 +400,237 @@ def test_vision():
         print("No input images found in", input_dir)
         return
     
+    if image_number != None:
+        files = [files[image_number - 1]]
+    
+    start_time = time.perf_counter()
+
+    all_sampled_hsv = []
+
+    color_configs = [
+        {
+            "name": "Pink",
+            "draw_color": (147, 20, 255),
+            "ranges": [
+                (np.array([160, 20, 50]), np.array([170, 170, 255])),
+                (np.array([160, 20, 50]), np.array([180, 90, 255]))
+            ]
+        },
+        {
+            "name": "Red",
+            "draw_color": (0, 0, 255),
+            "ranges": [
+                (np.array([0, 50, 50]), np.array([10, 255, 255])),
+                (np.array([170, 90, 50]), np.array([180, 255, 255]))
+            ]
+        },
+        {
+            "name": "Green",
+            "draw_color": (0, 255, 0),
+            "ranges": [(np.array([35, 40, 40]), np.array([85, 255, 255]))]
+        },
+        {
+            "name": "Blue",
+            "draw_color": (255, 0, 0),
+            "ranges": [(np.array([100, 50, 50]), np.array([140, 255, 255]))]
+        },
+        {
+            "name": "Yellow",
+            "draw_color": (255, 255, 0),
+            "ranges": [(np.array([20, 100, 100]), np.array([30, 255, 255]))]
+        },
+        {
+            "name": "floor",
+            "draw_color": (255, 255, 0),
+            "ranges": [
+                        (np.array([9, 54, 212]), np.array([29, 84, 232])),
+                        (np.array([9, 87, 163]), np.array([25, 104, 183])),
+                        (np.array([9, 84, 184]), np.array([26, 112, 196])),
+                        (np.array([11, 46, 225]), np.array([31, 71, 250])),
+                        (np.array([11, 54, 184]), np.array([31, 84, 212])),
+                        (np.array([11, 66, 176]), np.array([21, 81, 191])),
+                        (np.array([11, 77, 189]), np.array([23, 89, 201])),
+                        (np.array([11, 79, 202]), np.array([25, 97, 229])),
+                        (np.array([11, 79, 161]), np.array([31, 99, 181])),
+                        (np.array([13, 31, 232]), np.array([31, 53, 255])),
+                        (np.array([13, 46, 245]), np.array([23, 59, 255])),
+                        (np.array([15, 41, 217]), np.array([29, 61, 229])),
+                        (np.array([15, 82, 225]), np.array([25, 92, 235])),
+                        (np.array([16, 49, 194]), np.array([31, 59, 214])),
+                        (np.array([19, 54, 181]), np.array([29, 64, 191])),
+                        (np.array([21, 51, 207]), np.array([31, 61, 217])),
+                        (np.array([22, 84, 176]), np.array([32, 94, 186])),
+                        (np.array([24, 51, 163]), np.array([34, 61, 173])),
+                        (np.array([26, 36, 235]), np.array([37, 51, 245])),
+                        (np.array([27, 18, 232]), np.array([37, 28, 242])),
+                        (np.array([30, 5, 230]), np.array([40, 15, 240]))
+            ]
+        }
+    ]
+    
+    # Identify which config is the 'floor' for special logic
+    floor_cfg = next(c for c in color_configs if c['name'] == 'floor')
+    other_cfgs = [c for c in color_configs if c['name'] != 'floor']
+
+    for filename in files:
+        img_path = os.path.join(input_dir, filename)
+        img = cv.imread(img_path)
+        if img is None: continue
+        
+        hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
+        height, width = hsv.shape[:2]
+
+        # 1. Create Masks
+        def get_mask(config):
+            mask = np.zeros((height, width), dtype=np.uint8)
+            for (lower, upper) in config["ranges"]:
+                range_mask = cv.inRange(hsv, lower, upper)
+                mask = cv.bitwise_or(mask, range_mask)
+            return mask
+
+        floor_mask = get_mask(floor_cfg) > 0
+        
+        # Track which color mask matches for condition 4
+        color_mask_ids = np.zeros((height, width), dtype=int) # 0 means none
+        any_color_mask = np.zeros((height, width), dtype=bool)
+        
+        for i, cfg in enumerate(other_cfgs, 1):
+            m = get_mask(cfg) > 0
+            color_mask_ids[m] = i
+            any_color_mask = np.logical_or(any_color_mask, m)
+
+        # 2. Pre-calculate "7 out of 10 floor pixels" using convolution
+        # We look at y+1 to y+10. 
+        kernel = np.ones((10, 1), dtype=np.float32)
+        # We shift the floor mask so the "sum" at (x,y) represents pixels below it
+        floor_float = floor_mask.astype(np.float32)
+        floor_counts = cv.filter2D(floor_float, -1, kernel, anchor=(0, 0))
+        seven_of_ten = floor_counts >= 7
+
+        # 3. Dynamic Programming / Bottom-up constraint check
+        # matches[y, x] stores if pixel satisfies constraint
+        matches = np.zeros((height, width), dtype=bool)
+        
+        # Base Case: y >= 240
+        matches[240:, :] = True
+
+        cv.imshow('Floor Mask', floor_mask.astype(np.uint8)*255)
+        
+        # Recursive Case: y < 240 (Iterate 239 down to 0)
+        for y in range(239, -1, -1):
+            # Condition 1: (x, y+1) must match
+            c1 = matches[y+1, :]
+            
+            # Condition 3: matches floor
+            c3 = floor_mask[y, :]
+            
+            # Condition 4: matches a color mask
+            # Same color mask at y+1 OR 7/10 floor pixels
+            same_color = (color_mask_ids[y, :] == color_mask_ids[y+1, :]) & (color_mask_ids[y, :] > 0)
+            c4 = any_color_mask[y, :] & (same_color | seven_of_ten[y+1, :])
+            
+            # Condition 2: matches nothing (neither floor nor color)
+            # Must have 7/10 floor pixels
+            c2 = (~floor_mask[y, :]) & (~any_color_mask[y, :]) & seven_of_ten[y+1, :]
+            
+            matches[y, :] = c1 & (c2 | c3 | c4)
+
+        # 4. Find the top matching pixel for each column
+        # np.argmax returns the first index where the value is True (lowest y)
+        # We also check if any match exists in that column at all
+        has_match = np.any(matches, axis=0)
+        top_indices = np.argmax(matches, axis=0)
+
+        # Create a copy of the original image to annotate
+        annotated_img = img.copy()
+
+        # Color the top pixels red [BGR: (0, 0, 255)]
+        for x in range(width):
+            if has_match[x]:
+                y = top_indices[x]
+                annotated_img[y, x] = [0, 0, 255]
+
+        # Save to the output folder
+        save_path = os.path.join(output_dir, filename)
+        cv.imwrite(save_path, annotated_img)
+
+        # 5. Sample 100 pixels
+        y_coords, x_coords = np.where(matches)
+        if len(y_coords) > 0:
+            indices = np.random.choice(len(y_coords), min(100, len(y_coords)), replace=False)
+            for idx in indices:
+                all_sampled_hsv.append(hsv[y_coords[idx], x_coords[idx]])
+
+    # 6. Plotting
+    if all_sampled_hsv:
+        all_sampled_hsv = np.array(all_sampled_hsv)
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection='3d')
+        
+        h = all_sampled_hsv[:, 0]
+        s = all_sampled_hsv[:, 1]
+        v = all_sampled_hsv[:, 2]
+        
+        img = ax.scatter(h, s, v, c=v, cmap='inferno', marker='o', alpha=0.5)
+        ax.set_xlabel('Hue (H)')
+        ax.set_ylabel('Saturation (S)')
+        ax.set_zlabel('Value (V)')
+        plt.title('3D HSV Pixel Distribution')
+        plt.show()
+
+    return all_sampled_hsv
+
+
+
+
+
+
+
+
+
+
+
+
+def process_image(img: cv.Mat) -> cv.Mat:
+    #img_annotated = annotate_image(img)
+
+    #processed_img = process_blobs(img)
+    #processed_img = process_blobs_refined(img)
+    #blur = calculate_blur_coefficient(img)
+    #processed_img = annotate_image(img, f"blur {blur}", 0)
+    hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
+    plot_hsv_space(hsv)
+    return img
+
+
+# Testing function. Loads images from data/ and processes them.
+# You can run this with:
+# py -m src.computer-vision.pioneer-robot
+def test_vision_all_images(image_number: int = None):
+    print("Testing Computer Vision")
+
+    input_dir = 'data/pioneer_images/raw'
+    output_dir = 'data/pioneer_images/annotated/'
+    #input_dir = 'data/gripper_images/raw'
+    #output_dir = 'data/gripper_images/annotated/'
+
+    # List all files in the raw directory
+    files = [f for f in os.listdir(input_dir) if f.lower().endswith('.png')]
+
+    files.sort(key=lambda f: int(re.sub(r'\D', '', f)))
+    
+    if not files:
+        print("No input images found in", input_dir)
+        return
+    
+    if image_number != None:
+        files = [files[image_number - 1]]
+    
     start_time = time.perf_counter()
 
     for filename in files:
         img_path = os.path.join(input_dir, filename)
-        img = cv2.imread(img_path)
+        img = cv.imread(img_path)
 
         if img is None:
             print(f"Skipping {filename}: could not load image.")
@@ -290,7 +640,7 @@ def test_vision():
 
         # Save to the annotated folder
         save_path = os.path.join(output_dir, filename)
-        cv2.imwrite(save_path, processed_image)
+        cv.imwrite(save_path, processed_image)
         print(f"Processed and saved: {filename}")
 
     end_time = time.perf_counter()
@@ -299,4 +649,11 @@ def test_vision():
     print(f"Took {1000 * execution_time / len(files):.1f} ms per image, or {len(files) / execution_time:.1f} images/second")
 
 
-test_vision()
+
+
+
+
+
+#test_vision_all_images()
+#test_vision_all_images(image_number=138)
+sample_hsv_values(138)

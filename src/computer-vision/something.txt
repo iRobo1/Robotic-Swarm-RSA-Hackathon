@@ -1,0 +1,227 @@
+import cv2 as cv
+import numpy as np
+import os
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+import random
+
+def process_images(input_dir, color_configs):
+    all_sampled_hsv = []
+    
+    # Identify which config is the 'floor' for special logic
+    floor_cfg = next(c for c in color_configs if c['name'] == 'floor')
+    other_cfgs = [c for c in color_configs if c['name'] != 'floor']
+
+    files = [f for f in os.listdir(input_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+
+    for filename in files:
+        img_path = os.path.join(input_dir, filename)
+        img = cv.imread(img_path)
+        if img is None: continue
+        
+        hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
+        height, width = hsv.shape[:2]
+
+        # 1. Create Masks
+        def get_mask(config):
+            mask = np.zeros((height, width), dtype=np.uint8)
+            for (lower, upper) in config["ranges"]:
+                range_mask = cv.inRange(hsv, lower, upper)
+                mask = cv.bitwise_or(mask, range_mask)
+            return mask
+
+        floor_mask = get_mask(floor_cfg) > 0
+        
+        # Track which color mask matches for condition 4
+        color_mask_ids = np.zeros((height, width), dtype=int) # 0 means none
+        any_color_mask = np.zeros((height, width), dtype=bool)
+        
+        for i, cfg in enumerate(other_cfgs, 1):
+            m = get_mask(cfg) > 0
+            color_mask_ids[m] = i
+            any_color_mask = np.logical_or(any_color_mask, m)
+
+        # 2. Pre-calculate "7 out of 10 floor pixels" using convolution
+        # We look at y+1 to y+10. 
+        kernel = np.ones((10, 1), dtype=np.float32)
+        # We shift the floor mask so the "sum" at (x,y) represents pixels below it
+        floor_float = floor_mask.astype(np.float32)
+        floor_counts = cv.filter2D(floor_float, -1, kernel, anchor=(0, 0))
+        seven_of_ten = floor_counts >= 7
+
+        # 3. Dynamic Programming / Bottom-up constraint check
+        # matches[y, x] stores if pixel satisfies constraint
+        matches = np.zeros((height, width), dtype=bool)
+        
+        # Base Case: y >= 240
+        matches[240:, :] = True
+        
+        # Recursive Case: y < 240 (Iterate 239 down to 0)
+        for y in range(239, -1, -1):
+            # Condition 1: (x, y+1) must match
+            c1 = matches[y+1, :]
+            
+            # Condition 3: matches floor
+            c3 = floor_mask[y, :]
+            
+            # Condition 4: matches a color mask
+            # Same color mask at y+1 OR 7/10 floor pixels
+            same_color = (color_mask_ids[y, :] == color_mask_ids[y+1, :]) & (color_mask_ids[y, :] > 0)
+            c4 = any_color_mask[y, :] & (same_color | seven_of_ten[y+1, :])
+            
+            # Condition 2: matches nothing (neither floor nor color)
+            # Must have 7/10 floor pixels
+            c2 = (~floor_mask[y, :]) & (~any_color_mask[y, :]) & seven_of_ten[y+1, :]
+            
+            matches[y, :] = c1 & (c2 | c3 | c4)
+
+        # 4. Sample 100 pixels
+        y_coords, x_coords = np.where(matches)
+        if len(y_coords) > 0:
+            indices = np.random.choice(len(y_coords), min(100, len(y_coords)), replace=False)
+            for idx in indices:
+                all_sampled_hsv.append(hsv[y_coords[idx], x_coords[idx]])
+
+    # 5. Plotting
+    if all_sampled_hsv:
+        all_sampled_hsv = np.array(all_sampled_hsv)
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection='3d')
+        
+        h = all_sampled_hsv[:, 0]
+        s = all_sampled_hsv[:, 1]
+        v = all_sampled_hsv[:, 2]
+        
+        img = ax.scatter(h, s, v, c=v, cmap='inferno', marker='o', alpha=0.5)
+        ax.set_xlabel('Hue (H)')
+        ax.set_ylabel('Saturation (S)')
+        ax.set_zlabel('Value (V)')
+        plt.title('3D HSV Pixel Distribution')
+        plt.show()
+
+    return all_sampled_hsv
+
+
+
+
+Fill out the following floor config.
+{
+            "name": "floor",
+            "draw_color": (255, 255, 0),
+            "ranges": [
+                (np.array([123, 123, 123]), np.array([123, 123, 123])),
+                (np.array([123, 123, 123]), np.array([123, 123, 123])),
+...
+                ]
+        }
+such that the ranges of values e.g. np.array([123, 123, 123]), np.array([123, 123, 123]) contains first the lower bound of HSV values and then the upper bound of HSV values. Find a small set of bounds that matches the following HSV values +/-2 for each of the HSV channels. For example, if 
+35 21 98
+is one of the HSV values in the list below, then all the values
+35(+/-2) 21(+/-2) 98(+/-2)
+should be matched by the range. Values that aren't within 2 of each of the HSV channels should not be matched by the range.
+Here is the list:
+
+
+62 16 94
+37 20 99
+36 17 98
+46 19 96
+37 20 99
+35 22 94
+35 15 97
+45 19 93
+63 18 94
+48 21 94
+51 21 96
+70 4 92
+65 9 93
+51 20 96
+49 21 92
+51 14 94
+40 18 97
+40 21 93
+45 29 87
+31 33 76
+32 30 76
+40 22 88
+45 23 87
+50 26 77
+46 21 87
+33 30 71
+32 28 73
+36 16 97
+40 23 91
+43 24 87
+48 25 87
+34 29 76
+37 24 89
+32 28 74
+46 23 81
+40 29 85
+36 32 77
+48 24 85
+52 21 82
+51 22 83
+49 18 88
+43 18 96
+43 22 93
+42 21 78
+28 27 86
+49 26 74
+38 16 95
+36 36 87
+58 22 66
+51 27 76
+49 24 74
+49 23 73
+43 27 77
+34 31 81
+37 33 81
+33 27 78
+31 33 87
+42 29 87
+33 33 85
+41 33 86
+36 20 96
+42 35 75
+53 33 69
+54 35 71
+45 28 74
+37 23 90
+38 25 89
+42 31 85
+29 38 74
+40 34 90
+41 34 88
+35 21 98
+34 42 74
+38 28 87
+33 23 92
+37 25 89
+
+
+
+{
+    "name": "floor",
+    "draw_color": (255, 255, 0),
+    "ranges": [
+        # Range 1: Covers the "High Value / Low Saturation" group 
+        # (The bright, neutral tones like 62, 16, 94)
+        (np.array([26, 2, 85]), np.array([72, 23, 100])),
+
+        # Range 2: Covers the "Mid-Saturation / Mid-Value" group
+        # (The tanner tones like 40, 34, 90)
+        (np.array([27, 21, 80]), np.array([53, 44, 95])),
+
+        # Range 3: Covers the "Darker / More Saturated" group
+        # (The deeper shadows like 33, 33, 71 or 58, 22, 66)
+        (np.array([29, 16, 64]), np.array([60, 40, 83])),
+
+        # Range 4: Covers the "Lower Hue / High Saturation" outliers
+        # (Specifically points around 28, 27, 86 and 34, 42, 74)
+        (np.array([26, 25, 72]), np.array([40, 44, 90]))
+    ]
+}
+
+
+
