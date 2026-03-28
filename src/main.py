@@ -60,27 +60,10 @@ def on_receive_objective(from_team_id, from_robot_id, tag_id, x, y, angle, visib
     }
     objectives.append(new_objective)
 
+def on_receive_basket(from_team_id, from_robot_id, basket):
+    print("Basket received", basket)
+
 def on_receive_custom(from_team_id, from_robot_id, internal_type, contents):
-    print(from_team_id)
-    print(from_robot_id)
-    print(internal_type)
-    print(list(contents))
-    if internal_type == OUR_BASKET_MSG:
-        try:
-            x, y, team, scanned, item_delivered, measurement_distance = struct.unpack("<ff B ?? f", contents)
-            basket = Basket(
-                pos=Position(x, y),
-                team=Team(team),
-                measurement_distance=measurement_distance
-            )
-            basket.scanned = scanned
-            basket.item_delivered = item_delivered
-            print(f"Received basket from robot {robot_id}: {basket}")
-            return basket
-        except Exception as e:
-            print(f"Could not parse basket message: {e}")
-    # This is called whenever another robot sends a custom message
-    print("custom received!", internal_type)
     if internal_type == 99:
         try:
             a, b = struct.unpack("<BB", contents)
@@ -93,6 +76,7 @@ communication.register_callback_start(on_receive_start)
 communication.register_callback_stop(on_receive_stop)
 communication.register_callback_objective(on_receive_objective)
 communication.register_callback_custom(on_receive_custom)
+communication.register_callback_our_basket()
 
 
 ##### Main loop #####
