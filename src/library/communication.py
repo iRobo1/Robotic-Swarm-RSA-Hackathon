@@ -4,12 +4,14 @@ import threading
 import struct
 import asyncio
 import time
-
+from arena import Basket, Position, Team
 LOCATION_MSG = 1
 START_MSG = 2
 STOP_MSG = 3
 OBJECTIVE_FOUND_MSG = 4
 CUSTOM_MSG = 5
+
+OUR_BASKET_MSG = 37 # hopefully nobody is going to use it
 
 class Communication:
     def __init__(self, host, team_id, robot_id, password):
@@ -23,7 +25,22 @@ class Communication:
         self.stop_callback = None
         self.objective_callback = None
         self.custom_callback = None
+        self.basket_callback = None
         self._start_listening()
+
+    def register_callback_our_basket(self, func):
+        """
+        Register a callback for location updates.
+
+        Example:
+            def on_receive_basket(basket):
+                # team_id (int): Team ID that found the basket (should be us - 5)
+                # robot_id (int): Robot ID that found the basket
+                # basket: Basket
+            
+                client.register_callback_basket(on_receive_basket)
+        """
+        self.basket_callback = func
     
 
     def register_callback_location(self, func):
@@ -153,14 +170,26 @@ class Communication:
         Returns:
             bool: True if successful, False otherwise.
         """
-        packet = struct.pack("<BBB", target_team_id, target_robot_id, internal_type) + contents
+        packet = struct.pack("<BBBB", target_team_id, target_robot_id, 0, internal_type) + contents
         url = f"http://{self.host}/custom/{self.team_id}/{self.robot_id}"
         try:
             requests.post(url, auth=self.auth, data=packet)
             return True
         except Exception as e:
             print(f"Could not send objective message: {e}")
-            return False     
+            return False    
+
+    def send_basket(self, basket, target_robot_id=0):
+        contents = struct.pack(
+            "<ff B ?? f",
+            basket.pos.x,
+            basket.pos.y,
+            basket.team.value,
+            basket.scanned,
+            basket.item_delivered,
+            basket.measurement_distance
+        )
+        self.send_custom_msg(5, target_robot_id, OUR_BASKET_MSG, contents) 
 
 
     def _start_listening(self):
@@ -169,7 +198,6 @@ class Communication:
             daemon=True
         )
         self._thread.start()
-
 
     async def _connect_and_listen_to_websocket(self):
         url = f"ws://{self.host}/ws/connect/{self.team_id}/{self.robot_id}?password={self.password}"
@@ -196,8 +224,26 @@ class Communication:
                                     self.objective_callback(team_id, robot_id, tag_id, x, y, angle, visible, last_seen)
                             elif message == CUSTOM_MSG:
                                 _, team_id, robot_id, internal_type = struct.unpack("<BBBB", packet[0:4])
-                                if self.custom_callback:
-                                    self.custom_callback(team_id, robot_id, internal_type, packet[5:])
+                                if internal_type == OUR_BASKET_MSG:
+                                    if self.basket_callback:
+                                        try:
+                                            x, y, team, scanned, item_delivered, measurement_distance = struct.unpack("<ff B ?? f", packet[4:])
+                                            basket = Basket(
+                                                pos=Position(x, y),
+                                                team=Team(team),
+                                                measurement_distance=measurement_distance
+                                            )
+                                            basket.scanned = False
+                                            basket.item_delivered = False
+
+                                            print(f"Received basket from robot {robot_id}: {basket}")
+                                            self.basket_callback(team_id, robot_id, basket)
+
+                                        except Exception as e:
+                                            print(f"Could not parse basket message: {e}")
+
+                                elif self.custom_callback:
+                                    self.custom_callback(team_id, robot_id, internal_type, packet[4:])
                             else:
                                 print(f"Unknown message type {message} received")
                         except Exception as e:

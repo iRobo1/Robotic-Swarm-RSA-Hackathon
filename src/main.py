@@ -26,8 +26,9 @@ import hardware as hd
 from library.robot_small import Robot # Change to robot_big for the MIRTE Master
 
 from library.detector import Detector
-from library.communication import Communication
+from library.communication import Communication, OUR_BASKET_MSG
 import library.utils as utils
+from arena import Basket, Position, Team
 
 # CHANGE DEPENDING ON ROBOT
 PIONEER_ROBOT = True # True for pioneer robots, false for the MIRTE Gripper robot
@@ -85,12 +86,13 @@ def on_receive_objective(from_team_id, from_robot_id, tag_id, x, y, angle, visib
     }
     objectives.append(new_objective)
 
-def on_receive_custom(from_team_id, from_robot_id, internal_type, bytes):
-    # This is called whenever another robot sends a custom message
-    print("custom received!", internal_type)
-    if internal_type == 12:
+def on_receive_basket(from_team_id, from_robot_id, basket):
+    print("Basket received", basket)
+
+def on_receive_custom(from_team_id, from_robot_id, internal_type, contents):
+    if internal_type == 99:
         try:
-            a, b = struct.unpack("<BB", bytes)
+            a, b = struct.unpack("<BB", contents)
             print(a,b)
         except Exception as e:
             print("Could not parse message")
@@ -102,12 +104,18 @@ def main():
     communication.register_callback_stop(on_receive_stop)
     communication.register_callback_objective(on_receive_objective)
     communication.register_callback_custom(on_receive_custom)
+    communication.register_callback_our_basket()
 
 
     ##### Main loop #####
     # Send a custom message to itself (internal type 99, contents is two 8-bit integers (BB): 123 and 45)
     # You should see the robot receive this message as well
     communication.send_custom_msg(team_id, robot_id, 99, struct.pack("<BB", 123, 45))
+
+# Test basket message
+communication.send_basket(
+    Basket(Position(1, 1), 5, 2.0)
+)
 
 # Drive forward for 2 seconds
 #driving_time = 30.0
