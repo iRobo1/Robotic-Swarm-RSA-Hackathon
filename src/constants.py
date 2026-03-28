@@ -1,6 +1,6 @@
 # A file to hold magic numbers :)
 
-from utils import Position
+from src.utils import Position
 
 ####################################################
 ############## SHARED ROBOT CONSTANTS ##############
