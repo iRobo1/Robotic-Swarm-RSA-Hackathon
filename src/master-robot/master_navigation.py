@@ -23,11 +23,11 @@ from library.communication import Communication
 # ==========================================
 # 0. TEST MODE CONFIG
 # ==========================================
-TEST_MODE_NO_CAMERA = True  
+TEST_MODE_NO_CAMERA = False  
 
 current_x, current_y, current_angle = 0.0, 0.0, 0.0
 is_moving_allowed = False 
-is_visible = True 
+is_visible = False 
 
 # ==========================================
 # 1. INITIALIZATION & SETUP
@@ -72,9 +72,9 @@ is_start_captured = False # We'll use this to wait for the first camera frame
 # --- LIDAR DATA ---
 # APF Tuning Parameters
 K_ATT = 1.0       
-K_REP = 0.15     
+K_REP = 0.30     
 MAX_TOTAL_REP = 3.0  
-D_OBSTACLE = 0.6
+D_OBSTACLE = 0.4
 MAX_SPEED = 0.4   
 ROBOT_RADIUS = 0.20
 CHASSIS_IGNORE_ZONE = 0.25     
@@ -92,6 +92,16 @@ ir_right_dist = 1.0
 IR_THRESHOLD = 0.12 # The zone where IR takes over 
 K_IR_REP = 2.5 # High gain to ensure this overrides the attractive force
 
+
+# --- MISSION COORDINATES ---
+PICKUP_X = 5.53
+PICKUP_Y = 1.11
+PICKUP_ANGLE = -1.55
+
+# --- MISSION COORDINATES ---
+TARGET_1_X = 0.54
+TARGET_1_Y = 1.53
+TARGET_1_ANGLE = 2.26
 
 # ==========================================
 # 3. CALLBACK FUNCTIONS
@@ -111,6 +121,9 @@ def on_receive_location(x, y, angle, visible, last_seen):
         
         is_visible = True
     else:
+        if not is_start_captured:
+            # This tells you the server is working, but the tag is hidden!
+            print("Server connected, but AprilTag is hidden/not detected...", end="\r")
         is_visible = False
 
 def on_receive_start():
@@ -217,8 +230,9 @@ def calculate_local_apf_vector():
     global_angle_to_goal = math.atan2(global_dy, global_dx)
     local_angle_to_goal = utils.angle_difference(global_angle_to_goal, current_angle) 
     
-    att_force_local_x = K_ATT * dist_to_goal * math.cos(local_angle_to_goal)
-    att_force_local_y = K_ATT * dist_to_goal * math.sin(local_angle_to_goal)
+    effective_dist = min(dist_to_goal, 1.5)
+    att_force_local_x = K_ATT * effective_dist * math.cos(local_angle_to_goal)
+    att_force_local_y = K_ATT * effective_dist * math.sin(local_angle_to_goal)
     
     # LiDAR repulsion (Long-range)
     rep_lidar_x, rep_lidar_y = get_lidar_repulsive_forces()
@@ -226,9 +240,12 @@ def calculate_local_apf_vector():
     # IR repulsion (Short-range/Safety)
     rep_ir_x, rep_ir_y = get_ir_repulsive_vector()
 
+    # HOME base wall repulsion
+    rep_wall_x, rep_wall_y = get_virtual_wall_repulsion()
+
     # Calculating total force
-    total_x = att_force_local_x + rep_lidar_x + rep_ir_x
-    total_y = att_force_local_y + rep_lidar_y + rep_ir_y
+    total_x = att_force_local_x + rep_lidar_x + rep_ir_x + rep_wall_x
+    total_y = att_force_local_y + rep_lidar_y + rep_ir_y + rep_wall_y
 
     # --- DEBUGGING DASHBOARD
     current_time = time.time()
@@ -260,6 +277,128 @@ def calculate_local_apf_vector():
     
     return total_x, total_y
 
+def get_virtual_wall_repulsion():
+    """
+    Creates an invisible force field at Y = 1.0. 
+    If the robot drops below Y = 1.4, it starts getting pushed away.
+    """
+    global current_y, current_angle
+    
+    Y_WALL = 1.0
+    WALL_INFLUENCE_DIST = 0.4 # Starts pushing when the robot reaches Y = 1.4
+    K_WALL_REP = 1.0          # How aggressively it pushes back
+    
+    dist_to_wall = current_y - Y_WALL
+    
+    if 0 < dist_to_wall < WALL_INFLUENCE_DIST:
+        # Standard APF math for the wall's push magnitude
+        force_mag = K_WALL_REP * ((1.0 / dist_to_wall) - (1.0 / WALL_INFLUENCE_DIST)) * (1.0 / (dist_to_wall**2))
+        
+        # The wall pushes STRICTLY "UP" in the global Y axis (+90 degrees or pi/2)
+        global_push_angle = math.pi / 2
+        
+        # Translate that global UP push into the robot's local left/right/forward perspective
+        local_push_angle = utils.angle_difference(global_push_angle, current_angle)
+        
+        wall_rep_local_x = force_mag * math.cos(local_push_angle)
+        wall_rep_local_y = force_mag * math.sin(local_push_angle)
+        
+        return wall_rep_local_x, wall_rep_local_y
+        
+    elif dist_to_wall <= 0:
+        # Emergency: If it somehow crosses the line, throw a massive push directly away from the wall
+        global_push_angle = math.pi / 2
+        local_push_angle = utils.angle_difference(global_push_angle, current_angle)
+        return 3.0 * math.cos(local_push_angle), 3.0 * math.sin(local_push_angle)
+        
+    return 0.0, 0.0
+
+
+# ==========================================
+# FINAL APPROACH
+# ==========================================
+
+def execute_final_approach():
+    """
+    Bypasses the APF and uses raw LiDAR to center the basket and dock smoothly.
+    Returns True when the robot is 22cm away from the basket.
+    """
+    global global_lidar_data, current_x, current_y, current_angle
+    
+    if not global_lidar_data:
+        stop_motors()
+        return False
+
+    num_points = len(global_lidar_data)
+    angle_increment = (2 * math.pi) / num_points 
+    
+    min_dist = 999.0
+    basket_angle = 0.0
+    
+    # We only care about objects directly in front of us (30 degrees left/right)
+    FRONT_CONE = math.pi / 6 
+    
+    for i, distance in enumerate(global_lidar_data):
+        beam_angle = -math.pi + (i * angle_increment) + LIDAR_MOUNT_ANGLE
+        norm_angle = beam_angle
+        while norm_angle > math.pi: norm_angle -= 2 * math.pi
+        while norm_angle < -math.pi: norm_angle += 2 * math.pi
+        
+        # Ignore our own chassis
+        if distance <= CHASSIS_IGNORE_ZONE:
+            continue
+            
+        # If the object is in our front cone, track the closest point
+        if abs(norm_angle) < FRONT_CONE:
+            if distance < min_dist:
+                min_dist = distance
+                basket_angle = norm_angle
+
+    if min_dist != 999.0:
+        # We see the basket!
+        print(f"FINAL APPROACH: Basket seen at {min_dist:.2f}m, Aligning...", end="\r")
+        
+        if min_dist <= 0.28: # 28cm stopping distance!
+            stop_motors()
+            print("\n Basket reached and aligned! Stopping.")
+            return True
+        else:
+            # Drive forward slowly at 0.15 m/s
+            forward_speed = 0.15 
+            
+            # Steer to keep the basket perfectly centered
+            # (Using the -1.5 inverted steering fix you already applied!)
+            angular_z = utils.clamp(-1.5 * basket_angle, -0.5, 0.5)
+            
+            mirte.drive(forward_speed, 0.0, angular_z)
+            if TEST_MODE_NO_CAMERA:
+                simulate_camera_feedback(forward_speed, 0.0, angular_z)
+                
+            return False
+            
+    else:
+        # Fallback: If we don't see the basket, just crawl to the global coordinates
+        print("FINAL APPROACH: Searching for basket...", end="\r")
+        
+        global_dx = target_x - current_x
+        global_dy = target_y - current_y
+        dist_to_global = math.sqrt(global_dx**2 + global_dy**2)
+        
+        if dist_to_global < 0.15:
+            stop_motors()
+            print("\nReached global coordinates blindly.")
+            return True
+            
+        global_heading = math.atan2(global_dy, global_dx)
+        angle_error = utils.angle_difference(global_heading, current_angle)
+        
+        angular_z = utils.clamp(-1.5 * angle_error, -0.5, 0.5)
+        mirte.drive(0.15, 0.0, angular_z)
+        
+        if TEST_MODE_NO_CAMERA:
+            simulate_camera_feedback(0.15, 0.0, angular_z)
+            
+        return False
 
 # ==========================================
 # IR SENSORS
@@ -352,7 +491,7 @@ def calculate_angular_velocity():
 
     angle_error = utils.angle_difference(target_heading, current_angle)
 
-    return utils.clamp(1.5 * angle_error, -0.8, 0.8)
+    return utils.clamp(-1.5 * angle_error, -0.8, 0.8)
 
 def apply_motor_commands(local_x, local_y):
     angular_z = calculate_angular_velocity() 
@@ -435,6 +574,8 @@ def main():
     global target_x, target_y, target_angle, navigation_state, is_moving_allowed   
     global stuck_ref_x, stuck_ref_y, last_stuck_check_time 
     global is_start_captured, initial_x, initial_y, initial_angle
+    global current_x, current_y, current_angle
+    global TARGET_1_X, TARGET_1_Y, TARGET_1_ANGLE
     
     # START THE ROS ENGINE IMMEDIATELY
     executor = MultiThreadedExecutor()
@@ -467,7 +608,7 @@ def main():
 
 
     # 2. TARGET & START OVERRIDE (Hardcoded for testing)
-    objective_queue.put({"x": 3.0, "y": 0.0, "tag_id": 99}) 
+    objective_queue.put({"x": TARGET_1_X, "y": TARGET_1_Y, "tag_id": 99}) 
     is_moving_allowed = True # MANUAL START FOR TESTING --> CHANGE IN THE COMPETITION 
 
     try:    
@@ -482,28 +623,61 @@ def main():
                         print(f"Navigating to X:{target_x:.2f}, Y:{target_y:.2f}")
                     
                 elif navigation_state == "DELIVERING":
-                    if math.sqrt((target_x - current_x)**2 + (target_y - current_y)**2) < 0.20: 
-                        stop_motors()
-                        print("Arrived at Global Target!")
-                        execute_dropoff_sequence()
-                        target_x, target_y = initial_x, initial_y
-                        navigation_state = "RETURNING"
-                        print(f"Returning to Start: X:{target_x:.2f}, Y:{target_y:.2f}")
+                    dist_to_goal = math.sqrt((target_x - current_x)**2 + (target_y - current_y)**2)
+
+                    if dist_to_goal < 0.50: 
+                        print("50cm from target! Entering Final Approach Mode...")
+                        navigation_state = "FINAL_APPROACH"
                     else:
+                        # Continue normal APF navigation
                         local_x, local_y = calculate_local_apf_vector()
                         apply_motor_commands(local_x, local_y)
+
+                elif navigation_state == "FINAL_APPROACH":
+                    # returns True when it touches the 22cm mark
+                    is_docked = execute_final_approach()
+                    
+                    if is_docked:
+                        execute_dropoff_sequence()
+                        
+                        # Set coordinates to the known Pickup Zone
+                        target_x, target_y = PICKUP_X, PICKUP_Y
+                        target_angle = PICKUP_ANGLE
+                        navigation_state = "RETURNING"
+                        print(f"Returning to Pickup Zone: X:{target_x:.2f}, Y:{target_y:.2f}")
                 
                 elif navigation_state == "RETURNING":
-                    if math.sqrt((target_x - current_x)**2 + (target_y - current_y)**2) < 0.10: 
+                    # We use 0.15m to safely arrive at the zone without Zeno's Paradox
+                    if math.sqrt((target_x - current_x)**2 + (target_y - current_y)**2) < 0.15: 
                         stop_motors()
-                        navigation_state = "IDLE"
-                        print("Back at Home Base.")
+                        print(f"Reached Pickup Zone. Aligning to angle {target_angle}...")
+                        navigation_state = "ALIGNING_PICKUP"
                     else:
                         local_x, local_y = calculate_local_apf_vector()
                         apply_motor_commands(local_x, local_y)
                    
+                elif navigation_state == "ALIGNING_PICKUP":
+                    # Calculate how far off we are from -1.55 radians
+                    angle_error = utils.angle_difference(target_angle, current_angle)
+                    
+                    # If we are within ~3 degrees (0.05 rad), stop!
+                    if abs(angle_error) < 0.05:
+                        stop_motors()
+                        navigation_state = "IDLE"
+                        print("\n Perfectly aligned at Pickup Position! Waiting for next task.")
+                    else:
+                        # Spin in place! 
+                        # We use your -1.5 inverted steering fix here too!
+                        angular_z = utils.clamp(-1.5 * angle_error, -0.6, 0.6)
+                        
+                        mirte.drive(0.0, 0.0, angular_z) # 0.0 forward/sideways speed
+                        
+                        if TEST_MODE_NO_CAMERA:
+                            simulate_camera_feedback(0.0, 0.0, angular_z)
+            
             elif not is_visible:
                 stop_motors()
+                print("VISION LOST: Camera cannot see the AprilTag! Waiting for vision...", end="\r")
 
             time.sleep(0.05)
         
