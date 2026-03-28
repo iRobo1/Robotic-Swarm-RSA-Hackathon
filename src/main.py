@@ -190,7 +190,7 @@ def update_baskets_with_basket(new_basket: Basket) -> None:
                     existing.pos.x = new_basket.pos.x
                     existing.pos.y = new_basket.pos.y
                     existing.measurement_distance = new_basket.measurement_distance
-                    existing.clipped_image = False;
+                    existing.clipped_image = False
             
                 if existing.team is None and new_basket.team is not None:
                     existing.team = new_basket.team
@@ -396,8 +396,8 @@ def distance_to_target(target_position: Position) -> float:
     currentXPosition = robot_position["x"]
     currentYPosition = robot_position["y"]
 
-    toGoXPosition = target_position.x;
-    toGoYPosition = target_position.y;
+    toGoXPosition = target_position.x
+    toGoYPosition = target_position.y
 
     distance = math.sqrt(
         (currentXPosition - toGoXPosition) ** 2 +
@@ -436,7 +436,11 @@ def pioneer_main_loop():
                     target_position = new_random_position()
                     pathfind_towards_target(target_position)
             else:
-                pathfind_towards_target(target_position)
+                if target_assigned_time + 60 > time.time():
+                    target_position = new_random_position()
+                    target_assigned_time = time.time()
+                else:
+                    pathfind_towards_target(target_position)
 
     elif inside_quadrant_buffer:
         if target_basket != None:
