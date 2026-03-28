@@ -115,9 +115,12 @@ starting_time = time.time()
 current_quadrant = None # the quadrant the robot is supposed to be inside
 inside_quadrant = False # 1/4th of the map
 inside_quadrant_buffer = False # slightly larger than quadrant
+quadrant_assigned_time = time.time() # The time when the current quadrant was assigned
+quadrant_change_time = 240 # time in seconds before switching to a new quadrant
 
 target_basket = None # robot's current target basket (pathfinding towards here)
 target_position = None # robot's current target position (pathfinding towards here usually if no target basket)
+target_assigned_time = time.time() # The time the current target was assigned (a robot can give up on a target if needed)
 
 # The field has coordinates from (0, 0) to (6, 7.5).
 starting_line_y = 1.0 # Needs to be measured precisely!
@@ -184,8 +187,9 @@ def is_basket_available_in_quadrant(quadrant: Quadrant) -> bool:
 def choose_closest_uncompleted_team_basket() -> Basket:
     return all_known_baskets[0]
 
-# update everything about the robot's state
-# inside_quadrant, inside_quadrant_buffer, etc.
+# update everything about the robot's state:
+# current_quadrant, inside_quadrant, inside_quadrant_buffer
+# if quadrant changes, update target_position and target_basket to None
 def update_state():
     pass
 
@@ -210,6 +214,16 @@ def new_random_position(quadrant: Quadrant) -> Position:
     pass
 
 
+# Forces the robot to make a 90 degree turn (to see new baskets with camera)
+# (approximately is enough)
+def turn_90_clockwise() -> None:
+    pass
+
+
+# Calculates the distance from the robot to the target
+def distance_to_target(target_position: Position) -> float:
+    pass
+
 ###############################
 ###### ACTUAL MAIN LOOPS ######
 ###############################
@@ -218,13 +232,44 @@ def pioneer_main_loop():
 
     update_state()
 
+    turning_attempts = 0
+
+    # MISSING TIMEOUTS (if targets are unreachable or too much time is wasted trying to get to one)
+    # then the robot should give up and pick a new target
     if inside_quadrant:
         if is_basket_available_in_quadrant():
-            target_basket = choose_highest_value_basket()
+            target_basket = choose_highest_value_basket(current_quadrant)
+            target_position = None
+            pathfind_towards_basket(target_basket)
+        else:
+            if target_position == None:
+                target_position = new_random_position()
+
+            if distance_to_target(target_position) < 0.5:
+                if turning_attempts < 3:
+                    turn_90_clockwise()
+                    time.sleep(0.2) # Sleep 200 ms for camera to stabilise
+                    turning_attempts += 1
+                else:
+                    turning_attempts = 0
+                    target_position = new_random_position()
+                    pathfind_towards_target(target_position)
+            else:
+                pathfind_towards_target(target_position)
+
     elif inside_quadrant_buffer:
-        pass
+        if target_basket != None:
+            pathfind_towards_basket(target_basket)
+        else:
+            target_position = new_random_position()
+            pathfind_towards_target(target_position)
     else:
-        pass
+        if target_basket != None:
+            pathfind_towards_basket(target_basket)
+        else:
+            target_position = new_random_position()
+            pathfind_towards_target(target_position)
+
 
 
 def gripper_main_loop():
@@ -245,7 +290,7 @@ if PIONEER_ROBOT:
     pioneer_main_loop()
 else:
     current_quadrant = quadrant_0
-    
+
     gripper_main_loop()
 
 
