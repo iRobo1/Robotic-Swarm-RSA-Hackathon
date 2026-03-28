@@ -9,7 +9,16 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import random
 import numpy as np
+from src.robot import Team
 
+
+team_mapping = {
+    "red": Team.RED,
+    "yellow": Team.YELLOW,
+    "blue": Team.BLUE,
+    "green": Team.GREEN,
+    "pink": Team.PINK,
+}
 
 color_configs = [
     {
@@ -77,6 +86,30 @@ color_configs = [
             (np.array([12, 35, 144]), np.array([31, 109, 191])),
             (np.array([7, 60, 211]), np.array([28, 101, 251]))
         ]
+    },
+    {
+        "name": "white", # LLM generated values, need to be calibrated with April Tags
+        "draw_color": (255, 255, 255),
+        "ranges": [
+            # Pure white to slightly off-white (Low Saturation, High Value)
+            (np.array([0, 0, 200]), np.array([180, 55, 255])),
+            # Slightly cooler/bluer white
+            (np.array([90, 0, 220]), np.array([130, 30, 255])),
+            # Slightly warmer/yellowish white
+            (np.array([20, 0, 220]), np.array([40, 30, 255]))
+        ]
+    },
+    {
+        "name": "black", # LLM generated values, need to be calibrated with April Tags
+        "draw_color": (0, 0, 0),
+        "ranges": [
+            # Pure black to dark charcoal (Very low Value)
+            (np.array([0, 0, 0]), np.array([180, 255, 50])),
+            # Deep shadows with slight blue tint
+            (np.array([100, 20, 0]), np.array([140, 255, 40])),
+            # Deep shadows with slight red/brown tint
+            (np.array([0, 20, 0]), np.array([20, 255, 40]))
+        ]
     }
 ]
 
@@ -87,11 +120,13 @@ def find_visible_baskets_in_image(img: cv.Mat) -> list[tuple[Basket, float]]:
     NotImplemented
 
 
+SAVE_TEST_IMAGES = False
 # Save image to data/test_outputs/
 def save_test_image(img: cv.Mat, filename: str):
-    output_dir = 'data/test_outputs/'
-    save_path = os.path.join(output_dir, filename)
-    cv.imwrite(save_path, img)
+    if SAVE_TEST_IMAGES:
+        output_dir = 'data/test_outputs/'
+        save_path = os.path.join(output_dir, filename)
+        cv.imwrite(save_path, img)
 
 
 # Annotates an image by adding text in the top left on the given row
@@ -125,52 +160,51 @@ def process_blobs_refined(img):
     IMG_HEIGHT = 480
     TARGET_Y = 200
 
+    #blur = calculate_blur_coefficient(img)
+
     save_test_image(img, "1original_image.png")
-
-    blur = calculate_blur_coefficient(img)
-
-    img = annotate_image(img, "hi", 0)
-    img = annotate_image(img, "world", 1)
-    img = annotate_image(img, f"blur: {blur}", 2)
-
-    save_test_image(img, "1annotated_image.png")
 
     # 2. Convert to HSV
     hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
-    # SAVE: HSV Image (Note: looks weird in BGR space, but useful for debugging)
-    save_test_image(hsv, "3hsv_image.png")
     
+    color_masks = {}
 
-    # Wood color range (converted roughly to HSV for more robust checking)
-    # Based on the RGBs provided, wood is roughly Hue 15-30, Sat 20-50%, Val 60-90%
-    lower_wood = np.array([10, 30, 130])
-    upper_wood = np.array([30, 150, 255])
+    # Vertical opening to help with sharp top/bottom edges (except black and white)
+    kernel = np.ones((5, 1), np.uint8)
 
     for config in color_configs:
         name = config["name"]
-        draw_color = config["draw_color"]
         
-        # Initialize an empty mask for the current color
-        # hsv.shape[:2] gives us (height, width)
-        mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
+        # Initialize a blank mask for the current color
+        # hsv should be your pre-processed HSV image
+        combined_mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
         
+        # Combine all defined ranges for this specific color
         for (lower, upper) in config["ranges"]:
             range_mask = cv.inRange(hsv, lower, upper)
-            # Combine ranges using bitwise OR
-            mask = cv.bitwise_or(mask, range_mask)
+            combined_mask = cv.bitwise_or(combined_mask, range_mask)
         
-        # SAVE: The combined mask for this specific color
-        save_test_image(mask, f"4mask_{name.lower()}.png")
+        # Apply morphologyEx ONLY if the color is NOT black or white
+        if name.lower() not in ["white", "black"]:
+            combined_mask = cv.morphologyEx(combined_mask, cv.MORPH_OPEN, kernel)
+    
+        # Map the color name to the computed mask in our dictionary
+        color_masks[name] = combined_mask
 
-        # Vertical opening to help with sharp top/bottom edges
-        kernel = np.ones((5, 1), np.uint8)
-        #kernel = np.ones((5, 2), np.uint8)
-        mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel)
+        save_test_image(combined_mask, f"4mask_{name.lower()}.png")
 
-        # SAVE: The combined mask for this specific color
-        save_test_image(mask, f"5mask_with_morph_{name.lower()}.png")
 
-        contours, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+    baskets = []
+
+    basket_colors = ["red", "blue", "green", "yellow", "pink"]
+    for basket_color in basket_colors:
+        mask = color_masks[basket_color]
+        draw_color = next(c["draw_color"] for c in color_configs if c["name"] == basket_color)
+
+        mask_combined = mask # white and black masks are very wrong!
+        #mask_combined = cv.bitwise_or(mask, color_masks["black"]) # April tag counts as matching
+        #mask_combined = cv.bitwise_or(mask_combined, color_masks["white"]) # April tag counts as matching
+        contours, _ = cv.findContours(mask_combined, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
 
         # SAVE: Visualization of contours for this color
         contour_img = np.zeros((IMG_HEIGHT, IMG_WIDTH, 3), dtype=np.uint8)
@@ -180,7 +214,7 @@ def process_blobs_refined(img):
         for cnt in contours:
             x, y, w, h = cv.boundingRect(cnt)
 
-            cv.rectangle(img, (x, y), (x + w, y + h), draw_color, 1)
+            #cv.rectangle(img, (x, y), (x + w, y + h), draw_color, 1)
             
             # Initial filter: must cross Y=200
             if not (y <= TARGET_Y <= (y + h)):
@@ -217,39 +251,47 @@ def process_blobs_refined(img):
             if new_h < 25 or new_w < 10:
                 continue
 
-            # --- Wood Color Check ---
-            # Look at 10 pixels starting 2 pixels below the bottom edge
+            save_test_image(img, f"7before_floor_check_{name.lower()}.png")
+
+            # --- Wood (Floor) Color Check ---
+            # Instead of cv.inRange, we slice the pre-calculated "floor" mask
             wood_y_start = new_y + new_h + 2
             wood_y_end = wood_y_start + 10
             
-            # Ensure we stay within image bounds
             if wood_y_end < IMG_HEIGHT:
-                wood_roi_hsv = hsv[wood_y_start:wood_y_end, new_x:new_x + new_w]
-                wood_mask = cv.inRange(wood_roi_hsv, lower_wood, upper_wood)
-                save_test_image(wood_mask, f"7mask_wood_{name.lower()}.png")
+                # Access the floor mask from our dictionary
+                floor_mask = color_masks.get("floor")
                 
-                # Check if average pixel satisfies "wood" (more than 50% of ROI)
-                if np.mean(wood_mask) > 127.5:
-                    # Draw Bounding Box
-                    cv.rectangle(img, (new_x, new_y), (new_x + new_w, new_y + new_h), draw_color, 1)
+                if floor_mask is not None:
+                    # Slice the floor mask at the target ROI
+                    wood_roi_mask = floor_mask[wood_y_start:wood_y_end, new_x:new_x + new_w]
                     
-                    # Draw Black vertical lines inside the boundary
-                    # Left vertical line
-                    cv.line(img, (new_x + 1, new_y), (new_x + 1, new_y + new_h), (0, 0, 0), 1)
-                    # Right vertical line
-                    cv.line(img, (new_x + new_w - 1, new_y), (new_x + new_w - 1, new_y + new_h), (0, 0, 0), 1)
+                    # Check if average pixel satisfies "floor/wood" (more than 50% of ROI)
+                    if np.mean(wood_roi_mask) > 127.5:
+                        # Draw Bounding Box
+                        cv.rectangle(img, (new_x, new_y), (new_x + new_w, new_y + new_h), draw_color, 1)
+
+                        basket_height = new_h
+                        basket_position_x = new_x + new_w//2
+
+                        basket = Basket(pos=basket_position_x, team=team_mapping[basket_color], measurement_distance=10)
+                        baskets.append(basket)
+                        
+                        # Draw Black vertical lines inside the boundary
+                        cv.line(img, (new_x + 1, new_y), (new_x + 1, new_y + new_h), (0, 0, 0), 1)
+                        cv.line(img, (new_x + new_w - 1, new_y), (new_x + new_w - 1, new_y + new_h), (0, 0, 0), 1)
 
     # Final requirement: Add the red horizontal line at height 200
     cv.line(img, (0, TARGET_Y), (IMG_WIDTH, TARGET_Y), (0, 0, 255), 1)
 
     save_test_image(img, f"8final_image_{name.lower()}.png")
 
-    return img
+    return (img, baskets)
 
 
 def process_image(img: cv.Mat) -> cv.Mat:
-    #processed_img = process_blobs_refined(img)
-    return img
+    processed_img, _ = process_blobs_refined(img)
+    return processed_img
 
 
 # Testing function. Loads images from data/ and processes them.
@@ -298,7 +340,7 @@ def test_vision_all_images(image_number: int = None):
     print(f"Took {1000 * execution_time / len(files):.1f} ms per image, or {len(files) / execution_time:.1f} images/second")
 
 
-
 test_vision_all_images()
+#test_vision_all_images(image_number=43)
 #test_vision_all_images(image_number=138)
 
