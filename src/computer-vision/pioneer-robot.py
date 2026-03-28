@@ -121,6 +121,7 @@ def find_visible_baskets_in_image(img: cv.Mat) -> list[tuple[Basket, float]]:
 
 
 SAVE_TEST_IMAGES = False
+DRAW_DEBUG = False
 # Save image to data/test_outputs/
 def save_test_image(img: cv.Mat, filename: str):
     if SAVE_TEST_IMAGES:
@@ -155,7 +156,89 @@ def calculate_blur_coefficient(img: cv.Mat) -> float:
     return fm
 
 
-def process_blobs_refined(img) -> tuple[cv.Mat, list[tuple[int, int, Team]]]:
+def process_bounding_boxes(bounding_boxes):
+    # Helper to calculate intersection area
+    def get_intersection_area(box1, box2):
+        x1, y1, dx1, dy1 = box1[:4]
+        x2, y2, dx2, dy2 = box2[:4]
+        
+        ix = max(x1, x2)
+        iy = max(y1, y2)
+        iw = min(x1 + dx1, x2 + dx2) - ix
+        ih = min(y1 + dy1, y2 + dy2) - iy
+        
+        if iw > 0 and ih > 0:
+            return iw * ih
+        return 0
+
+    # --- Step 1: Overlap Resolution ---
+    remaining = sorted(bounding_boxes, key=lambda b: b[2] * b[3], reverse=True)
+    stage1_results = []
+
+    while remaining:
+        # Take the largest box in the current set
+        largest = remaining.pop(0)
+        lx, ly, ldx, ldy = largest[:4]
+        l_area = ldx * ldy
+        
+        keep_from_remaining = []
+        
+        for box in remaining:
+            bx, by, bdx, bdy = box[:4]
+            b_area = bdx * bdy
+            inter_area = get_intersection_area(largest, box)
+            
+            if inter_area == 0:
+                keep_from_remaining.append(box)
+                continue
+                
+            overlap_pct = inter_area / b_area
+            
+            if overlap_pct > 0.20:
+                # Remove: do not add to keep_from_remaining
+                continue
+            else:
+                # Decrease the box by the overlap amount
+                # The prompt implies shrinking the box's dimensions or area. 
+                # Common interpretation: reduce dimensions by the intersecting bounds.
+                new_bx = bx if bx >= lx + ldx or bx + bdx <= lx else max(bx, lx + ldx)
+                new_by = by if by >= ly + ldy or by + bdy <= ly else max(by, ly + ldy)
+                # Note: Adjusting x/y and dx/dy based on specific intersection side
+                # For simplicity, we ensure dimensions are recalculated:
+                new_bdx = (bx + bdx) - new_bx
+                new_bdy = (by + bdy) - new_by
+                
+                if new_bdy >= 25 and new_bdx >= 10:
+                    keep_from_remaining.append((new_bx, new_by, new_bdx, new_bdy, box[4]))
+        
+        stage1_results.append(largest)
+        remaining = sorted(keep_from_remaining, key=lambda b: b[2] * b[3], reverse=True)
+
+    # --- Step 2: Vertical Containment Filtering ---
+    # "If [x2, x2+dx2] fully resides inside [x, x+dx] and y2 > y, remove second box"
+    final_boxes = []
+    to_remove = set()
+    
+    for i in range(len(stage1_results)):
+        for j in range(len(stage1_results)):
+            if i == j: continue
+            
+            x1, y1, dx1, dy1, _ = stage1_results[i]
+            x2, y2, dx2, dy2, _ = stage1_results[j]
+            
+            # Check if box2 is below box1 and horizontally contained
+            if y2 > y1 and x2 >= x1 and (x2 + dx2) <= (x1 + dx1):
+                to_remove.add(j)
+                
+    for idx, box in enumerate(stage1_results):
+        if idx not in to_remove:
+            final_boxes.append(box)
+            
+    return final_boxes
+
+
+
+def process_blobs_refined(img: cv.Mat) -> tuple[cv.Mat, list[tuple[int, int, Team]]]:
     IMG_WIDTH = 640
     IMG_HEIGHT = 480
     TARGET_Y = 200
@@ -193,11 +276,10 @@ def process_blobs_refined(img) -> tuple[cv.Mat, list[tuple[int, int, Team]]]:
 
         save_test_image(combined_mask, f"4mask_{name.lower()}.png")
 
-
-    baskets = []
-
+    bounding_boxes = []
     basket_colors = ["red", "blue", "green", "yellow", "pink"]
     for basket_color in basket_colors:
+        debug_img = img.copy()
         mask = color_masks[basket_color]
         draw_color = next(c["draw_color"] for c in color_configs if c["name"] == basket_color)
 
@@ -208,13 +290,14 @@ def process_blobs_refined(img) -> tuple[cv.Mat, list[tuple[int, int, Team]]]:
 
         # SAVE: Visualization of contours for this color
         contour_img = np.zeros((IMG_HEIGHT, IMG_WIDTH, 3), dtype=np.uint8)
-        cv.drawContours(contour_img, contours, -1, draw_color, 2)
-        save_test_image(contour_img, f"6contours_{name.lower()}.png")
+        if DRAW_DEBUG: cv.drawContours(contour_img, contours, -1, draw_color, 2)
+        save_test_image(contour_img, f"6contours_{basket_color.lower()}.png")
 
         for cnt in contours:
             x, y, w, h = cv.boundingRect(cnt)
 
-            #cv.rectangle(img, (x, y), (x + w, y + h), draw_color, 1)
+            if DRAW_DEBUG: cv.rectangle(debug_img, (x, y), (x + w, y + h), draw_color, 1)
+            save_test_image(debug_img, f"7before_contraction_{basket_color.lower()}.png")
             
             # Initial filter: must cross Y=200
             if not (y <= TARGET_Y <= (y + h)):
@@ -251,40 +334,62 @@ def process_blobs_refined(img) -> tuple[cv.Mat, list[tuple[int, int, Team]]]:
             if new_h < 25 or new_w < 10:
                 continue
 
-            save_test_image(img, f"7before_floor_check_{name.lower()}.png")
+            if DRAW_DEBUG: cv.rectangle(debug_img, (new_x, new_y), (new_x + new_w, new_y + new_h), draw_color, 1)
+            save_test_image(debug_img, f"7before_floor_check_{basket_color.lower()}.png")
 
             # --- Wood (Floor) Color Check ---
             # Instead of cv.inRange, we slice the pre-calculated "floor" mask
-            wood_y_start = new_y + new_h + 2
-            wood_y_end = wood_y_start + 10
+            wood_y_start = new_y + new_h + 2 # +2
+            wood_y_end = wood_y_start + 20
+
+            #print("running wood check")
             
             if wood_y_end < IMG_HEIGHT:
-                # Access the floor mask from our dictionary
                 floor_mask = color_masks.get("floor")
+
+                # Slice the floor mask at the target ROI
+                wood_roi_mask = floor_mask[wood_y_start:wood_y_end, new_x:new_x + new_w]
+
+                #print("checking ROI:", np.mean(wood_roi_mask))
                 
-                if floor_mask is not None:
-                    # Slice the floor mask at the target ROI
-                    wood_roi_mask = floor_mask[wood_y_start:wood_y_end, new_x:new_x + new_w]
+                # Check if average pixel satisfies "floor/wood" (more than 50% of ROI)
+                if np.mean(wood_roi_mask) > 127.5:
+                    #print("drawing bounding box")
+                    # Draw Bounding Box
+                    #cv.rectangle(img, (new_x, new_y), (new_x + new_w, new_y + new_h), draw_color, 1)
+                    bounding_boxes.append((new_x, new_y, new_w, new_h, basket_color))
+
+                    #basket_height = new_h
+                    #basket_position_x = new_x + new_w//2
+
+                    #basket = tuple(basket_position_x, basket_height, team=team_mapping[basket_color])
+                    #baskets.append(basket)
                     
-                    # Check if average pixel satisfies "floor/wood" (more than 50% of ROI)
-                    if np.mean(wood_roi_mask) > 127.5:
-                        # Draw Bounding Box
-                        cv.rectangle(img, (new_x, new_y), (new_x + new_w, new_y + new_h), draw_color, 1)
+                    # Draw Black vertical lines inside the boundary
+                    #cv.line(img, (new_x + 1, new_y), (new_x + 1, new_y + new_h), (0, 0, 0), 1)
+                    #cv.line(img, (new_x + new_w - 1, new_y), (new_x + new_w - 1, new_y + new_h), (0, 0, 0), 1)
 
-                        basket_height = new_h
-                        basket_position_x = new_x + new_w//2
 
-                        basket = tuple(basket_position_x, basket_height, team=team_mapping[basket_color])
-                        baskets.append(basket)
-                        
-                        # Draw Black vertical lines inside the boundary
-                        cv.line(img, (new_x + 1, new_y), (new_x + 1, new_y + new_h), (0, 0, 0), 1)
-                        cv.line(img, (new_x + new_w - 1, new_y), (new_x + new_w - 1, new_y + new_h), (0, 0, 0), 1)
+    #filtered_bounding_boxes = bounding_boxes
+    filtered_bounding_boxes = process_bounding_boxes(bounding_boxes)
+
+    baskets = []
+
+    for bounding_box in filtered_bounding_boxes:
+        x, y, dx, dy, basket_color = bounding_box
+        draw_color = next(c["draw_color"] for c in color_configs if c["name"] == basket_color)
+        cv.rectangle(img, (x, y), (x + dx, y + dy), draw_color, 1)
+
+        basket_y = y
+        basket_position_x = x + dx//2
+
+        baskets.append((basket_y, basket_position_x))
+
 
     # Final requirement: Add the red horizontal line at height 200
     cv.line(img, (0, TARGET_Y), (IMG_WIDTH, TARGET_Y), (0, 0, 255), 1)
 
-    save_test_image(img, f"8final_image_{name.lower()}.png")
+    save_test_image(img, f"8final_image.png")
 
     return (img, baskets)
 
