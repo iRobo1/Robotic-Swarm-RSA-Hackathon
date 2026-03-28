@@ -14,6 +14,8 @@ env.bak/
 venv.bak/
 
 # Data Files
-data/
+data/pioneer_images/annotated
+data/gripper_images/annotated
+test_outputs
 
 .vscode
