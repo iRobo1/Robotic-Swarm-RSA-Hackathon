@@ -12,7 +12,16 @@ from arena import Arena, Basket
 import math
 from src.robot import Robot, Team
 
+import sys
+import os
+from mirte_robot import robot
 
+# Test the wheel moving
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'pioneer-robot'))
+import hardware as hd
+
+
+# Main entry point to the program
 # CHANGE DEPENDING ON ROBOT
 from library.robot_small import Robot # Change to robot_big for the MIRTE Master
 
@@ -490,7 +499,17 @@ if PIONEER_ROBOT:
     elif robot_id == 3:
         current_quadrant = quadrant_3
 
+    # Initializes hardware n shit
+    mirte = robot.createRobot()
+    hd.set_motor_speed(mirte, 0, 0)
+    
     while(1):
+        print("Moving the motors")
+        hd.set_motor_speed(mirte, 60, 60)
+        sleep(1)
+        print("Stopping the motors")
+        hd.set_motor_speed(mirte, 0, 0)
+        sleep(2)
         rclpy.spin_once(robot, timeout_sec=0.1) # Process messages
         pioneer_main_loop()
 else:
