@@ -6,11 +6,18 @@ from sensor_msgs.msg import Image
 from enum import Enum
 import struct
 import numpy as np
+from utils import Position, Quadrant
+from arena import Arena, Basket
 
+# CHANGE DEPENDING ON ROBOT
 from library.robot_small import Robot # Change to robot_big for the MIRTE Master
+
 from library.detector import Detector
 from library.communication import Communication
 import library.utils as utils
+
+# CHANGE DEPENDING ON ROBOT
+PIONEER_ROBOT = True # True for pioneer robots, false for the MIRTE Gripper robot
 
 
 ###### Setup ######
@@ -93,6 +100,108 @@ while time.time() < t_end:
     tags = detector.detect_objective_tags()
     for tag in tags:
         print(f"Tag {tag.tag_id}, within distance: {utils.is_tag_within_distance(tag)}")
+
+
+
+
+
+
+##############################
+###### SHARED VARIABLES ######
+##############################
+
+starting_time = time.time()
+inside_quadrant = False # 1/4th of the map
+inside_quadrant_buffer = False # slightly larger than quadrant
+target_position = None # 
+target_basket = None # 
+
+# The field has coordinates from (0, 0) to (6, 7.5).
+starting_line_y = 1.0 # Needs to be measured precisely!
+field_max_x = 6.0
+field_max_y = 7.5
+buffer_width = 0.5
+# quadrants. The first one is the one closest to our zone, then they proceed clockwise
+quadrant_0 = Quadrant(Position(field_max_x / 2, starting_line_y), Position(field_max_x, starting_line_y + (field_max_y - starting_line_y) / 2))
+quadrant_1 = Quadrant(Position(field_max_x / 2, field_max_x, starting_line_y + (field_max_y - starting_line_y) / 2), Position(field_max_x, field_max_y))
+quadrant_2 = Quadrant(Position(0.0, field_max_x, starting_line_y + (field_max_y - starting_line_y) / 2), Position(field_max_x / 2, field_max_y))
+quadrant_3 = Quadrant(Position(0.0, starting_line_y), Position(field_max_x / 2, field_max_x, starting_line_y + (field_max_y - starting_line_y) / 2))
+
+quadrants = [quadrant_0, quadrant_1, quadrant_2, quadrant_3]
+
+# buffered quadrants (except where this would exceed field limits)
+quadrant_0_buffered = Quadrant(Position(quadrant_0.lower.x - buffer_width, quadrant_0.lower.y - buffer_width), Position(quadrant_0.upper.x, quadrant_0.upper.y + buffer_width))
+quadrant_1_buffered = Quadrant(Position(quadrant_1.lower.x - buffer_width, quadrant_1.lower.y - buffer_width), Position(quadrant_1.upper.x, quadrant_1.upper.y))
+quadrant_2_buffered = Quadrant(Position(quadrant_2.lower.x, quadrant_2.lower.y - buffer_width), Position(quadrant_2.upper.x + buffer_width, quadrant_2.upper.y + buffer_width))
+quadrant_3_buffered = Quadrant(Position(quadrant_3.lower.x, quadrant_3.lower.y - buffer_width), Position(quadrant_3.upper.x + buffer_width, quadrant_3.upper.y))
+
+buffered_quadrants = [quadrant_0_buffered, quadrant_1_buffered, quadrant_2_buffered, quadrant_3_buffered]
+
+#quadrants_test = [((3.0, 1.0), (6.0, 4.25)), ((3.0, 4.25), (6.0, 7.5)), ((0.0, 4.25), (3.0, 7.5)), ((0.0, 1.0), (3.0, 4.25))]
+
+# Our starting zone is around (5.0 to 6.0, 0.0 to 1.0), but this needs to be checked
+starting_zone_x = 5.0
+
+# Stores all known baskets (scanned or not)
+all_known_baskets = []
+
+
+
+############################################################
+#### PLACEHOLDER FUNCTIONS. IMPLEMENT HERE OR ELSEWHERE ####
+############################################################
+
+# Pick the basket that maximises the objective function:
+# f = visible + current_target + 
+#
+#
+#
+def choose_highest_value_basket() -> Basket:
+    return all_known_baskets[0]
+
+
+# Picks the closest basket that satisfies the conditions:
+# - belongs to our team (Basket team = Red)
+# - 
+def choose_closest_uncompleted_team_basket() -> Basket:
+    return all_known_baskets[0]
+
+
+
+###############################
+###### ACTUAL MAIN LOOPS ######
+###############################
+
+def pioneer_main_loop():
+    if inside_quadrant:
+        pass
+    elif inside_quadrant_buffer:
+        pass
+    else:
+        pass
+
+
+def gripper_main_loop():
+
+    pass
+
+
+if PIONEER_ROBOT:
+    # Pick starting quadrant based on robot_id
+    # I am assuming robot_id is either 1, 2, 3, or 4, but this can be adjusted later
+    if robot_id == 1:
+        pass
+    elif robot_id == 2:
+        pass
+    elif robot_id == 3:
+        pass
+    elif robot_id == 4:
+        pass
+
+    pioneer_main_loop()
+else:
+    gripper_main_loop()
+
 
 
 ##### Shutdown nicely #####
