@@ -445,7 +445,7 @@ def test_vision_all_images(image_number: int = None):
     print(f"Took {1000 * execution_time / len(files):.1f} ms per image, or {len(files) / execution_time:.1f} images/second")
 
 
-test_vision_all_images()
+#test_vision_all_images()
 #test_vision_all_images(image_number=43)
 #test_vision_all_images(image_number=138)
 
