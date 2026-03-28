@@ -1,1 +1,0 @@
-# A powershell (Windows) script connects to a Pioneer robot via ssh, uploads the code, and runs it.
