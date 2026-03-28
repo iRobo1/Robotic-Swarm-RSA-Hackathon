@@ -1,3 +1,23 @@
-.vscode/
-client_lib/
+# Byte-compiled / optimized / DLL files
 __pycache__/
+*.py[codz]
+*$py.class
+
+# Environments
+.env
+.envrc
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Data Files
+data/pioneer_images/annotated
+data/gripper_images/annotated
+test_outputs
+data/pioneer_images/raw
+data/gripper_images/raw
+
+.vscode
