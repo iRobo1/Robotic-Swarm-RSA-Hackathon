@@ -113,8 +113,8 @@ while time.time() < t_end:
 starting_time = time.time()
 inside_quadrant = False # 1/4th of the map
 inside_quadrant_buffer = False # slightly larger than quadrant
-target_position = None # 
-target_basket = None # 
+target_basket = None # robot's current target basket (pathfinding towards here)
+target_position = None # robot's current target position (pathfinding towards here usually if no target basket)
 
 # The field has coordinates from (0, 0) to (6, 7.5).
 starting_line_y = 1.0 # Needs to be measured precisely!
@@ -151,20 +151,49 @@ all_known_baskets = []
 #### PLACEHOLDER FUNCTIONS. IMPLEMENT HERE OR ELSEWHERE ####
 ############################################################
 
-# Pick the basket that maximises the objective function:
-# f = visible + current_target + 
-#
-#
-#
-def choose_highest_value_basket() -> Basket:
+# This should add the basket to the known baskets if it doesn't yet exist
+# Use proximity, team, and detection distance to determine if this is a new basket
+# or if an existing basket should be updated. Baskets that have been scanned
+# or have had items delivered should never be updated again.
+def update_baskets_with_basket(basket: Basket) -> None:
+    pass
+
+# Pick the basket that is inside the given quadrant and maximises the objective function:
+# f = visible + current_target + known_april_tag - euclidean_distance
+# where:
+# visible = 0.3 (visible in current camera frame)
+# current_target = 0.5 (prioritises pathfinding to current target rather than a new basket)
+# known_april_tag = 0.5 (april tag is already known, but hasn't been sent because not inside 50 cm range)
+# euclidean_distance = distance in meters from target
+def choose_highest_value_basket(quadrant: Quadrant) -> Basket:
     return all_known_baskets[0]
 
 
 # Picks the closest basket that satisfies the conditions:
 # - belongs to our team (Basket team = Red)
-# - 
+# - item not delivered yet (Basket item_delivered = False)
 def choose_closest_uncompleted_team_basket() -> Basket:
     return all_known_baskets[0]
+
+# update everything about the robot's state
+# inside_quadrant, inside_quadrant_buffer, etc.
+def update_state():
+    pass
+
+# Pathfinding towards a basket
+# This function should not block until reaching the target basket, but instead
+# make a 'step' towards it, e.g., 100 ms of movement.
+# The function should take care of obstacle avoidance, but remember to get close
+# to the target basket (not 'avoid' it)
+def pathfind_towards_basket(basket: Basket) -> None:
+    pass
+
+
+# Pathfinding towards a target
+# Same as above, but the target is some position rather than a basket
+# it shouldn't crash into an obstacle even if the position is inside one!
+def pathfind_towards_target(target_position: Position) -> None:
+    pass
 
 
 
@@ -173,6 +202,9 @@ def choose_closest_uncompleted_team_basket() -> Basket:
 ###############################
 
 def pioneer_main_loop():
+
+    update_state()
+
     if inside_quadrant:
         pass
     elif inside_quadrant_buffer:
