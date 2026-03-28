@@ -155,7 +155,7 @@ def calculate_blur_coefficient(img: cv.Mat) -> float:
     return fm
 
 
-def process_blobs_refined(img):
+def process_blobs_refined(img) -> tuple[cv.Mat, list[tuple[int, int, Team]]]:
     IMG_WIDTH = 640
     IMG_HEIGHT = 480
     TARGET_Y = 200
@@ -274,7 +274,7 @@ def process_blobs_refined(img):
                         basket_height = new_h
                         basket_position_x = new_x + new_w//2
 
-                        basket = Basket(pos=basket_position_x, team=team_mapping[basket_color], measurement_distance=10)
+                        basket = tuple(basket_position_x, basket_height, team=team_mapping[basket_color])
                         baskets.append(basket)
                         
                         # Draw Black vertical lines inside the boundary
