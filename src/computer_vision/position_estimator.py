@@ -39,7 +39,7 @@ def estimate_distance_from_img(img_height: int, fov_v: float, y_base: int) -> fl
     dist = 0.0
 
     theta_depress = fov_v * (y_base - img_height / 2) / img_height
-    dist = img_height / np.tan(np.radians(theta_depress))
+    dist = 0.13 / np.tan(np.radians(theta_depress))
 
     return dist
 
@@ -61,3 +61,4 @@ def estimate_position_from_img(robot_pos: Tuple[float, float], obj_dist: float, 
     obj_y = robot_y + obj_dist * np.sin(obj_angle)
 
     return (obj_x, obj_y)
+

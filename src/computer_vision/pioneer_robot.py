@@ -10,7 +10,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import random
 import numpy as np
 from src.robot import Team
-
+from src.computer_vision.position_estimator import *
 
 team_mapping = {
     "red": Team.RED,
@@ -385,6 +385,22 @@ def process_blobs_refined(img: cv.Mat) -> tuple[cv.Mat, list[tuple[int, int, Tea
 
         baskets.append((basket_y, basket_position_x))
 
+        d1 = estimate_obj_angle_in_img(640, 80.0, x, 0)
+        d2 = estimate_distance_from_img(480, 64.0, y)
+
+        obj_x, obj_y = estimate_position_from_img((0.0, 0.0), d2, d1)
+
+        font = cv.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.5
+        thickness = 1
+        color = (0, 0, 0)
+
+        #text = f"(x, y): ({obj_x:.1f}, {obj_y:.1f}), angle: {(d1-75):.1f}, dist: {-d2:.1f}"
+        text = f"angle: {(d1-75):.2f}, dist: {-d2:.2f}"
+
+        img = cv.putText(img, text, (x, y), font, font_scale, color, thickness, cv.LINE_AA)
+        
+
 
     # Final requirement: Add the red horizontal line at height 200
     cv.line(img, (0, TARGET_Y), (IMG_WIDTH, TARGET_Y), (0, 0, 255), 1)
@@ -394,8 +410,14 @@ def process_blobs_refined(img: cv.Mat) -> tuple[cv.Mat, list[tuple[int, int, Tea
     return (img, baskets)
 
 
+
+
+
+
 def process_image(img: cv.Mat) -> cv.Mat:
     processed_img, _ = process_blobs_refined(img)
+    #annotate_distance(process_image, coords)
+    
     return processed_img
 
 
@@ -433,6 +455,7 @@ def test_vision_all_images(image_number: int = None):
             continue
 
         processed_image = process_image(img)
+        #processed_image = annotate_distance(processed_image)
 
         # Save to the annotated folder
         save_path = os.path.join(output_dir, filename)
@@ -445,7 +468,7 @@ def test_vision_all_images(image_number: int = None):
     print(f"Took {1000 * execution_time / len(files):.1f} ms per image, or {len(files) / execution_time:.1f} images/second")
 
 
-#test_vision_all_images()
+test_vision_all_images()
 #test_vision_all_images(image_number=43)
 #test_vision_all_images(image_number=138)
 
