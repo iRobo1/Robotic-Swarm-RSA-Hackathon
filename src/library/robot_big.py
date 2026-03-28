@@ -12,6 +12,9 @@ from builtin_interfaces.msg import Duration
 from rclpy.action import ActionClient
 from control_msgs.action import GripperCommand
 
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge
+
 class Robot:
     def __init__(self):    
         # control parameters
@@ -31,10 +34,36 @@ class Robot:
 
         self.node = Node(f"robot")
 
+        # --- CAMERA SETUP ---
+        self.bridge = CvBridge()
+        self.last_image = None
+        # Subscribing to the topic we found in your terminal
+        self.image_sub = self.node.create_subscription(
+            Image,
+            "/camera/color/image_raw",
+            self.image_callback,
+            10)
+        # --------------------
+
         self.cmd_vel_pub = self.node.create_publisher(Twist, "/mirte_base_controller/cmd_vel", 10)
         self.arm_pub = self.node.create_publisher(JointTrajectory, "/mirte_master_arm_controller/joint_trajectory", 10)
         self.gripper_client = ActionClient(self.node, GripperCommand, "/mirte_master_gripper_controller/gripper_cmd")
 
+    # --- NEW CAMERA METHODS ---
+    def image_callback(self, msg):
+        """Receives image messages and converts them for the detector."""
+        try:
+            # Convert ROS image to a format the Detector/OpenCV can use
+            self.last_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+        except Exception as e:
+            # Silently fail if frame is corrupted to avoid terminal spam
+            pass
+
+    def get_last_image(self):
+        """Returns the most recent camera frame."""
+        return self.last_image
+    # --------------------------
+    
     def clamp_linear_speed(self, value, low, high):
         if value > 0.0 and value < 0.05:
             return 0.1
