@@ -110,6 +110,9 @@ while time.time() < t_end:
 ###### SHARED VARIABLES ######
 ##############################
 
+current_robot_position = Position(0.0, 0.0)
+
+
 starting_time = time.time()
 
 current_quadrant = None # the quadrant the robot is supposed to be inside
@@ -190,6 +193,7 @@ def choose_closest_uncompleted_team_basket() -> Basket:
 # update everything about the robot's state:
 # current_quadrant, inside_quadrant, inside_quadrant_buffer
 # if quadrant changes, update target_position and target_basket to None
+# update current_robot_position
 def update_state():
     pass
 
