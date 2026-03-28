@@ -17,5 +17,7 @@ venv.bak/
 data/pioneer_images/annotated
 data/gripper_images/annotated
 test_outputs
+data/pioneer_images/raw
+data/gripper_images/raw
 
 .vscode
