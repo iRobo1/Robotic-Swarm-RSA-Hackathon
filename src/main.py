@@ -152,7 +152,6 @@ starting_zone_x = 5.0
 all_known_baskets = []
 
 
-
 ############################################################
 #### PLACEHOLDER FUNCTIONS. IMPLEMENT HERE OR ELSEWHERE ####
 ############################################################
@@ -160,9 +159,44 @@ all_known_baskets = []
 # This should add the basket to the known baskets if it doesn't yet exist
 # Use proximity, team, and detection distance to determine if this is a new basket
 # or if an existing basket should be updated. Baskets that have been scanned
-# or have had items delivered should never be updated again.
-def update_baskets_with_basket(basket: Basket) -> None:
-    pass
+# or have had items delivered should never be updated again. use baskets exposition if its smaller than const than its a more reliable reading then the ones with a larger expos
+def update_baskets_with_basket(new_basket: Basket) -> None:
+    global all_known_baskets
+    
+    MATCH_THRESHOLD = 0.30 
+    
+    for existing in all_known_baskets:
+        dx = existing.pos.x - new_basket.pos.x
+        dy = existing.pos.y - new_basket.pos.y
+        dist = math.sqrt(dx**2 + dy**2)
+        
+        if dist < MATCH_THRESHOLD:
+
+            if existing.team is not None and new_basket.team is not None:
+                if existing.team != new_basket.team:
+                    return
+            
+            # 1. LOCKOUT: Never update completed objectives
+            if existing.scanned or existing.item_delivered:
+                return
+            
+            # 2. RELIABILITY CHECK: Only process readings with good exposure
+            if not new_basket.clipped_image:
+                
+                # 3. OVERWRITE CONDITIONS: Old reading was bad OR new reading is closer
+                if existing.clipped_image or new_basket.measurement_distance < existing.measurement_distance:
+                    existing.pos.x = new_basket.pos.x
+                    existing.pos.y = new_basket.pos.y
+                    existing.measurement_distance = new_basket.measurement_distance
+                    existing.clipped_image = False;
+            
+                if existing.team is None and new_basket.team is not None:
+                    existing.team = new_basket.team
+                    
+            return 
+            
+    # 5. NEW DISCOVERY: No match found within threshold
+    all_known_baskets.append(new_basket)
 
 # Selects the basket that is inside the given quadrant, has not yet been scanned, and
 # maximises the objective function:
@@ -172,27 +206,141 @@ def update_baskets_with_basket(basket: Basket) -> None:
 # current_target = 0.5 (prioritises pathfinding to current target rather than a new basket)
 # known_april_tag = 0.5 (april tag is already known, but hasn't been sent because not inside 50 cm range)
 # euclidean_distance = distance in meters from target
-def choose_highest_value_basket(quadrant: Quadrant) -> Basket:
-    return all_known_baskets[0]
+def choose_highest_value_basket(quadrant: Quadrant):
+    global all_known_baskets, target_basket, robot_position
+    
+    # Failsafe: Cannot calculate distance without robot position
+    if robot_position is None:
+        return None
+
+    best_basket = None
+    # Initialize to negative infinity because the score will often be negative 
+    # (e.g., distance is 3.0m, but bonuses only add up to 0.8)
+    max_score = float('-inf')
+
+    rx = robot_position["x"]
+    ry = robot_position["y"]
+
+    for basket in all_known_baskets:
+        # 1. Filter: Ignore already scanned baskets
+        if basket.scanned:
+            continue
+
+        # 2. Filter: Must be strictly inside the assigned quadrant
+        in_x = quadrant.lower.x <= basket.pos.x <= quadrant.upper.x
+        in_y = quadrant.lower.y <= basket.pos.y <= quadrant.upper.y
+        if not (in_x and in_y):
+            continue
+
+        # 3. Calculate Objective Function Components
+        score_visible = 0.3 if not basket.clipped_image else 0.0
+        score_target = 0.5 if basket == target_basket else 0.0
+        score_tag = 0.5 if basket.tag_id is not None else 0.0
+        
+        dist = math.sqrt((basket.pos.x - rx)**2 + (basket.pos.y - ry)**2)
+
+        # 4. f = visible + current_target + known_april_tag - euclidean_distance
+        current_score = score_visible + score_target + score_tag - dist
+
+        # 5. Maximize f
+        if current_score > max_score:
+            max_score = current_score
+            best_basket = basket
+
+    return best_basket
 
 
 # Checks if there is at least one basket in the given quadrant that has not been scanned yet
 def is_basket_available_in_quadrant(quadrant: Quadrant) -> bool:
-    pass
+    global all_known_baskets
+    
+    for basket in all_known_baskets:
+        # Check boundary conditions
+        in_x = quadrant.lower.x <= basket.pos.x <= quadrant.upper.x
+        in_y = quadrant.lower.y <= basket.pos.y <= quadrant.upper.y
+        
+        # Check if it is inside the quadrant AND has not been scanned yet
+        if in_x and in_y and not basket.scanned:
+            return True
+            
+    return False
 
 
-# Picks the closest basket that satisfies the conditions:
-# - belongs to our team (Basket team = Red)
-# - item not delivered yet (Basket item_delivered = False)
-def choose_closest_uncompleted_team_basket() -> Basket:
-    return all_known_baskets[0]
+import math
+
+def choose_closest_uncompleted_team_basket():
+    global all_known_baskets, robot_position, team_id
+    
+    # Failsafe: Cannot calculate distance without robot position
+    if robot_position is None:
+        return None
+        
+    closest_basket = None
+    min_dist = float('inf')
+    
+    rx = robot_position["x"]
+    ry = robot_position["y"]
+    
+    for basket in all_known_baskets:
+        # Filter: Must match our team AND not have an item delivered yet.
+        if basket.team == "Red" and not basket.item_delivered:
+            
+            dist = math.sqrt((basket.pos.x - rx)**2 + (basket.pos.y - ry)**2)
+            
+            if dist < min_dist:
+                min_dist = dist
+                closest_basket = basket
+                
+    return closest_basket
 
 # update everything about the robot's state:
 # current_quadrant, inside_quadrant, inside_quadrant_buffer
 # if quadrant changes, update target_position and target_basket to None
 # update current_robot_position
 def update_state():
-    pass
+    global current_quadrant, inside_quadrant, inside_quadrant_buffer
+    global target_position, target_basket
+    global quadrant_assigned_time, quadrant_change_time
+    global robot_position, quadrants, buffered_quadrants
+
+    if current_quadrant is None:
+        return
+
+    # 1. Timer Check: Rotate quadrants every 240 seconds
+    current_time = time.time()
+    if current_time - quadrant_assigned_time > quadrant_change_time:
+        
+        # Find current index and move to the next one
+        current_index = quadrants.index(current_quadrant)
+        next_index = (current_index + 1) % len(quadrants)
+        
+        current_quadrant = quadrants[next_index]
+        quadrant_assigned_time = current_time
+        
+        # Reset targets because the exploration zone just changed
+        target_position = None
+        target_basket = None
+        print(f"Timer triggered. Rotating to Quadrant {next_index}")
+
+    # 2. Location Check: Verify physical position against assigned quadrant
+    if robot_position is not None:
+        rx = robot_position["x"]
+        ry = robot_position["y"]
+
+        # Strict boundary check
+        inside_quadrant = (current_quadrant.lower.x <= rx <= current_quadrant.upper.x) and \
+                          (current_quadrant.lower.y <= ry <= current_quadrant.upper.y)
+
+        # Buffered boundary check
+        idx = quadrants.index(current_quadrant)
+        buf_quad = buffered_quadrants[idx]
+        
+        inside_quadrant_buffer = (buf_quad.lower.x <= rx <= buf_quad.upper.x) and \
+                                 (buf_quad.lower.y <= ry <= buf_quad.upper.y)
+    else:
+        # Failsafe if GPS is lost
+        inside_quadrant = False
+        inside_quadrant_buffer = False
 
 # Pathfinding towards a basket
 # This function should not block until reaching the target basket, but instead
