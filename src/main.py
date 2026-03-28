@@ -111,8 +111,11 @@ while time.time() < t_end:
 ##############################
 
 starting_time = time.time()
+
+current_quadrant = None # the quadrant the robot is supposed to be inside
 inside_quadrant = False # 1/4th of the map
 inside_quadrant_buffer = False # slightly larger than quadrant
+
 target_basket = None # robot's current target basket (pathfinding towards here)
 target_position = None # robot's current target position (pathfinding towards here usually if no target basket)
 
@@ -158,7 +161,8 @@ all_known_baskets = []
 def update_baskets_with_basket(basket: Basket) -> None:
     pass
 
-# Pick the basket that is inside the given quadrant and maximises the objective function:
+# Selects the basket that is inside the given quadrant, has not yet been scanned, and
+# maximises the objective function:
 # f = visible + current_target + known_april_tag - euclidean_distance
 # where:
 # visible = 0.3 (visible in current camera frame)
@@ -167,6 +171,11 @@ def update_baskets_with_basket(basket: Basket) -> None:
 # euclidean_distance = distance in meters from target
 def choose_highest_value_basket(quadrant: Quadrant) -> Basket:
     return all_known_baskets[0]
+
+
+# Checks if there is at least one basket in the given quadrant that has not been scanned yet
+def is_basket_available_in_quadrant(quadrant: Quadrant) -> bool:
+    pass
 
 
 # Picks the closest basket that satisfies the conditions:
@@ -196,6 +205,10 @@ def pathfind_towards_target(target_position: Position) -> None:
     pass
 
 
+# Select random position in quadrant that is atleast 1.0 meters away from the robot
+def new_random_position(quadrant: Quadrant) -> Position:
+    pass
+
 
 ###############################
 ###### ACTUAL MAIN LOOPS ######
@@ -206,7 +219,8 @@ def pioneer_main_loop():
     update_state()
 
     if inside_quadrant:
-        pass
+        if is_basket_available_in_quadrant():
+            target_basket = choose_highest_value_basket()
     elif inside_quadrant_buffer:
         pass
     else:
@@ -220,18 +234,18 @@ def gripper_main_loop():
 
 if PIONEER_ROBOT:
     # Pick starting quadrant based on robot_id
-    # I am assuming robot_id is either 1, 2, 3, or 4, but this can be adjusted later
+    # I am assuming robot_id is either 1, 2, 3, but this can be adjusted later
     if robot_id == 1:
-        pass
+        current_quadrant = quadrant_1
     elif robot_id == 2:
-        pass
+        current_quadrant = quadrant_2
     elif robot_id == 3:
-        pass
-    elif robot_id == 4:
-        pass
+        current_quadrant = quadrant_3
 
     pioneer_main_loop()
 else:
+    current_quadrant = quadrant_0
+    
     gripper_main_loop()
 
 
