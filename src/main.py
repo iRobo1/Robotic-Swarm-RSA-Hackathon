@@ -9,6 +9,8 @@ import struct
 import numpy as np
 from utils import Position, Quadrant
 from arena import Arena, Basket
+import math
+from src.robot import Robot, Team
 
 
 # CHANGE DEPENDING ON ROBOT
@@ -38,16 +40,19 @@ objectives = []
 
 ###### Callbacks #####
 def on_receive_location(x, y, angle, visible, last_seen):
+    global robot_position
     # This is called whenever the server sends the location of the robot
     # print("location received!")
     robot_position = {"x": x, "y": y, "angle": angle, "visible": visible, "last_seen": last_seen}
 
 def on_receive_start():
+    global stopped
     # This is called when the competition is started (and every 10 seconds during the competition)
     # print("start received :)")
     stopped = False
 
 def on_receive_stop():
+    global stopped
     # This is called when the competition is paused (and every 10 seconds while it is paused). You MUST stop your robot when this is called!
     # print("stop received :(")
     stopped = True
@@ -91,17 +96,17 @@ communication.register_callback_custom(on_receive_custom)
 communication.send_custom_msg(team_id, robot_id, 99, struct.pack("<BB", 123, 45))
 
 # Drive forward for 2 seconds
-driving_time = 30.0
-speed = 100
-t_end = time.time() + driving_time
-while time.time() < t_end:
-    # Drive by specifying the speed of the left and right motor
-    robot.drive(speed, speed)
-    # For the MIRTE Master: robot.drive(linear_x, linear_y, angular_z), all in m/s
-    # Print the detected april tags
-    tags = detector.detect_objective_tags()
-    for tag in tags:
-        print(f"Tag {tag.tag_id}, within distance: {utils.is_tag_within_distance(tag)}")
+#driving_time = 30.0
+#speed = 100
+#t_end = time.time() + driving_time
+#while time.time() < t_end:
+#    # Drive by specifying the speed of the left and right motor
+#    robot.drive(speed, speed)
+#    # For the MIRTE Master: robot.drive(linear_x, linear_y, angular_z), all in m/s
+#    # Print the detected april tags
+#    tags = detector.detect_objective_tags()
+#    for tag in tags:
+#        print(f"Tag {tag.tag_id}, within distance: {utils.is_tag_within_distance(tag)}")
 
 
 
@@ -131,9 +136,9 @@ field_max_y = 7.5
 buffer_width = 0.5
 # quadrants. The first one is the one closest to our zone, then they proceed clockwise
 quadrant_0 = Quadrant(Position(field_max_x / 2, starting_line_y), Position(field_max_x, starting_line_y + (field_max_y - starting_line_y) / 2))
-quadrant_1 = Quadrant(Position(field_max_x / 2, field_max_x, starting_line_y + (field_max_y - starting_line_y) / 2), Position(field_max_x, field_max_y))
-quadrant_2 = Quadrant(Position(0.0, field_max_x, starting_line_y + (field_max_y - starting_line_y) / 2), Position(field_max_x / 2, field_max_y))
-quadrant_3 = Quadrant(Position(0.0, starting_line_y), Position(field_max_x / 2, field_max_x, starting_line_y + (field_max_y - starting_line_y) / 2))
+quadrant_1 = Quadrant(Position(field_max_x / 2, starting_line_y + (field_max_y - starting_line_y) / 2), Position(field_max_x, field_max_y))
+quadrant_2 = Quadrant(Position(0.0, starting_line_y + (field_max_y - starting_line_y) / 2), Position(field_max_x / 2, field_max_y))
+quadrant_3 = Quadrant(Position(0.0, starting_line_y), Position(field_max_x / 2, starting_line_y + (field_max_y - starting_line_y) / 2))
 
 quadrants = [quadrant_0, quadrant_1, quadrant_2, quadrant_3]
 
@@ -268,7 +273,7 @@ def is_basket_available_in_quadrant(quadrant: Quadrant) -> bool:
     return False
 
 
-import math
+
 
 def choose_closest_uncompleted_team_basket():
     global all_known_baskets, robot_position, team_id
@@ -285,7 +290,7 @@ def choose_closest_uncompleted_team_basket():
     
     for basket in all_known_baskets:
         # Filter: Must match our team AND not have an item delivered yet.
-        if basket.team == "Red" and not basket.item_delivered:
+        if basket.team == Team.RED and not basket.item_delivered:
             
             dist = math.sqrt((basket.pos.x - rx)**2 + (basket.pos.y - ry)**2)
             
@@ -393,6 +398,8 @@ def turn_90_clockwise() -> None:
 
 # Calculates the distance from the robot to the target
 def distance_to_target(target_position: Position) -> float:
+    if robot_position is None:
+        return float(10)
     currentXPosition = robot_position["x"]
     currentYPosition = robot_position["y"]
 
@@ -408,23 +415,29 @@ def distance_to_target(target_position: Position) -> float:
 ###############################
 ###### ACTUAL MAIN LOOPS ######
 ###############################
-
+turning_attempts = 0
 def pioneer_main_loop():
+
+    global target_basket
+    global target_position
+    global target_assigned_time
+    global turning_attempts
+
 
     update_state()
 
-    turning_attempts = 0
+    
 
     # MISSING TIMEOUTS (if targets are unreachable or too much time is wasted trying to get to one)
     # then the robot should give up and pick a new target
     if inside_quadrant:
-        if is_basket_available_in_quadrant():
+        if is_basket_available_in_quadrant(current_quadrant):
             target_basket = choose_highest_value_basket(current_quadrant)
             target_position = None
             pathfind_towards_basket(target_basket)
         else:
             if target_position == None:
-                target_position = new_random_position()
+                target_position = new_random_position(current_quadrant)
 
             if distance_to_target(target_position) < 0.5:
                 if turning_attempts < 3:
@@ -433,11 +446,11 @@ def pioneer_main_loop():
                     turning_attempts += 1
                 else:
                     turning_attempts = 0
-                    target_position = new_random_position()
+                    target_position = new_random_position(current_quadrant)
                     pathfind_towards_target(target_position)
             else:
-                if target_assigned_time + 60 > time.time():
-                    target_position = new_random_position()
+                if target_assigned_time + 60 < time.time():
+                    target_position = new_random_position(current_quadrant)
                     target_assigned_time = time.time()
                 else:
                     pathfind_towards_target(target_position)
@@ -446,13 +459,13 @@ def pioneer_main_loop():
         if target_basket != None:
             pathfind_towards_basket(target_basket)
         else:
-            target_position = new_random_position()
+            target_position = new_random_position(current_quadrant)
             pathfind_towards_target(target_position)
     else:
         if target_basket != None:
             pathfind_towards_basket(target_basket)
         else:
-            target_position = new_random_position()
+            target_position = new_random_position(current_quadrant)
             pathfind_towards_target(target_position)
 
 
@@ -472,11 +485,14 @@ if PIONEER_ROBOT:
     elif robot_id == 3:
         current_quadrant = quadrant_3
 
-    pioneer_main_loop()
+    while(1):
+        rclpy.spin_once(robot, timeout_sec=0.1) # Process messages
+        pioneer_main_loop()
 else:
     current_quadrant = quadrant_0
 
-    gripper_main_loop()
+    while(1):
+        gripper_main_loop()
 
 
 
