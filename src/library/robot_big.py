@@ -11,7 +11,9 @@ from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from builtin_interfaces.msg import Duration
 from rclpy.action import ActionClient
 from control_msgs.action import GripperCommand
-from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge
 
 class Robot:
     def __init__(self):    
@@ -32,22 +34,43 @@ class Robot:
 
         self.node = Node(f"robot")
 
-        self.cmd_vel_pub = self.node.create_publisher(Twist,
-                                                      "/mirte_base_controller/cmd_vel",
-                                                      10,
-                                                      callback_group=MutuallyExclusiveCallbackGroup())
-        self.arm_pub = self.node.create_publisher(JointTrajectory,
-                                                  "/mirte_master_arm_controller/joint_trajectory",
-                                                  10,
-                                                  callback_group=MutuallyExclusiveCallbackGroup())
+        # --- CAMERA SETUP ---
+        self.bridge = CvBridge()
+        self.last_image = None
+        # Subscribing to the topic we found in your terminal
+        self.image_sub = self.node.create_subscription(
+            Image,
+            "/camera/color/image_raw",
+            self.image_callback,
+            10)
+        # --------------------
+
+        self.cmd_vel_pub = self.node.create_publisher(Twist, "/mirte_base_controller/cmd_vel", 10)
+        self.arm_pub = self.node.create_publisher(JointTrajectory, "/mirte_master_arm_controller/joint_trajectory", 10)
         self.gripper_client = ActionClient(self.node, GripperCommand, "/mirte_master_gripper_controller/gripper_cmd")
 
+    # --- NEW CAMERA METHODS ---
+    def image_callback(self, msg):
+        """Receives image messages and converts them for the detector."""
+        try:
+            # Convert ROS image to a format the Detector/OpenCV can use
+            self.last_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+        except Exception as e:
+            # Silently fail if frame is corrupted to avoid terminal spam
+            pass
+
+    def get_last_image(self):
+        """Returns the most recent camera frame."""
+        return self.last_image
+    # --------------------------
+    
     def clamp_linear_speed(self, value, low, high):
         if value > 0.0 and value < 0.05:
             return 0.1
         else:
             return clamp(value, low, high)
-
+    
+    
     def drive_to(self, target_x, target_y, target_orientation):   
         msg = Twist()
         # go to target
@@ -121,15 +144,20 @@ class Robot:
         # -2.5 to 2.5
         point = JointTrajectoryPoint()
         point.positions = [shoulder_rotate, shoulder_lift, elbow_joint, wrist_joint] 
-        point.time_from_start = Duration(sec=movement_duration)  
+        point.time_from_start = Duration(sec=int(movement_duration))  
 
         msg.points = [point]
         self.arm_pub.publish(msg)
     
-    def open_gripper(self, max_effort=10.0):
+    def open_gripper(self, max_effort=20.0):
         # max is 0.5 (closed) and (-0.5) open
-        position = 0.5
-        self.gripper_client.wait_for_server()
+        position = -0.5
+        print(f"Opening gripper (target: {position})...")
+
+        if not self.gripper_client.wait_for_server(timeout_sec=1.0):
+            print("Gripper Action Server not found!")
+            return
+        
 
         goal = GripperCommand.Goal()
         # if you want the gripper open put on -0.5 and if you want it closed put on 0.5?
@@ -138,13 +166,22 @@ class Robot:
         goal.command.max_effort = max_effort
 
         future = self.gripper_client.send_goal_async(goal)
-        rclpy.spin_until_future_complete(self.node, future)
+
+        while rclpy.ok() and not future.done():
+            time.sleep(0.1)
+        print("Gripper command sent.")
+
+        # rclpy.spin_until_future_complete(self.node, future)
 
     # max effor of 10 holds the items but maybe more needed
-    def close_gripper(self, max_effort=10.0):
+    def close_gripper(self, max_effort=20.0):
         # max is 0.5 (closed) and (-0.7) open
-        self.gripper_client.wait_for_server()
-        position= -0.5
+        position= 0.5
+        print(f"Closing gripper (target: {position})...")
+
+        if not self.gripper_client.wait_for_server(timeout_sec=1.0):
+            print("Gripper Action Server not found!")
+            return
 
         goal = GripperCommand.Goal()
         # if you want the gripper open put on -0.5 and if you want it closed put on 0.5?
@@ -153,4 +190,9 @@ class Robot:
         goal.command.max_effort = max_effort
 
         future = self.gripper_client.send_goal_async(goal)
-        rclpy.spin_until_future_complete(self.node, future)
+
+        while rclpy.ok() and not future.done():
+            time.sleep(0.1)
+        print("Gripper command sent.")
+        
+        #rclpy.spin_until_future_complete(self.node, future)
