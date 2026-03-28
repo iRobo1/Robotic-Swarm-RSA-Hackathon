@@ -128,29 +128,53 @@ def visualize_hsv(filtered_hsv, labels, hsv_ranges):
     plt.tight_layout()
     plt.show()
 
-# --- Execution ---
-# Load an image
-img = cv2.imread('data/colours/floor.png') # Replace with your file
-if img is not None:
-    N = 5  # Minimum occurrences or min samples in neighbourhood for DBSCAN
-    M = 5   # Number of clusters
-    
-    #points, ranges, cluster_labels = process_hsv_clusters(img, N, M)
-    points, ranges, cluster_labels = process_hsv_clusters_robust(image=img, min_samples=N, m_clusters=M)
-    
-    #print(f"Found {len(points)} unique HSV values occurring >= {N} times.")
-    #for idx, (low, high) in enumerate(ranges):
-    #    print(f"Cluster {idx+1} Range: Lower{low} - Upper{high}")
 
-    # Format the ranges into a list of strings
-    print("\n")
-    formatted_ranges = []
-    for low, high in ranges:
-        line = f"                (np.array([{low[0]}, {low[1]}, {low[2]}]), np.array([{high[0]}, {high[1]}, {high[2]}]))"
-        formatted_ranges.append(line)
+# Mapping for draw_colors (BGR)
+color_map = {
+    "yellow": (255, 255, 0),
+    "blue": (255, 0, 0),
+    "red": (0, 0, 255),
+    "green": (0, 255, 0),
+    "pink": (147, 20, 255),
+    "floor": (200, 200, 200)
+}
 
-    # Join the lines and wrap in the "ranges" key format
-    output = '"ranges": [\n' + ",\n".join(formatted_ranges) + '\n            ]'
+image_names = ["yellow", "blue", "red", "green", "pink", "floor"]
 
-    print(output)
-    visualize_hsv(points, cluster_labels, ranges)
+print("color_configs = [")
+for i, image_name in enumerate(image_names):
+    img = cv2.imread('data/colours/'+image_name+'.png')
+    if img is not None:
+        N = 5
+        M = 5
+        
+        points, ranges, cluster_labels = process_hsv_clusters_robust(image=img, min_samples=N, m_clusters=M)
+
+        # Build the range strings
+        formatted_ranges = []
+        for low, high in ranges:
+            line = f"            (np.array([{low[0]}, {low[1]}, {low[2]}]), np.array([{high[0]}, {high[1]}, {high[2]}]))"
+            formatted_ranges.append(line)
+        
+        ranges_str = ",\n".join(formatted_ranges)
+        draw_col = color_map.get(image_name, (255, 255, 255))
+
+        # Construct the specific dictionary block
+        output =  "    {\n"
+        output += f'        "name": "{image_name}",\n'
+        output += f'        "draw_color": {draw_col},\n'
+        output += f'        "ranges": [\n{ranges_str}\n'
+        output += "        ]\n"
+        output += "    }"
+        
+        # Add a comma if it's not the last item
+        if i < len(image_names) - 1:
+            output += ","
+
+        print(output)
+        # visualize_hsv(points, cluster_labels, ranges)
+
+
+        visualize_hsv(points, cluster_labels, ranges)
+
+print("]")
