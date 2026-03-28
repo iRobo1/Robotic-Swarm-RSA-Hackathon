@@ -7,6 +7,8 @@ from queue import Queue
 from std_msgs.msg import Int32
 from library.utils import angle_difference
 
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+
 class Robot:
     def __init__(self):    
         # control parameters
@@ -27,9 +29,15 @@ class Robot:
         
         self.node = Node(f"robot")
 
-        self.pub_motor_left = self.node.create_publisher(Int32, '/io/motor/left/speed', 10)
-        self.pub_motor_right = self.node.create_publisher(Int32, '/io/motor/right/speed', 10)
-    
+        self.pub_motor_left = self.node.create_publisher(Int32,
+                                                         '/io/motor/left/speed',
+                                                         10,
+                                                         callback_group=MutuallyExclusiveCallbackGroup())
+        self.pub_motor_right = self.node.create_publisher(Int32,
+                                                          '/io/motor/right/speed',
+                                                          10,
+                                                          callback_group=MutuallyExclusiveCallbackGroup())
+
     def drive(self, right_motor_speed, left_motor_speed):
         """
         Detect AprilTags in the provided image.
