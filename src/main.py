@@ -32,6 +32,9 @@ def on_receive_location(x, y, angle, visible, last_seen):
     # This is called whenever the server sends the location of the robot
     # print("location received!")
     robot_position = {"x": x, "y": y, "angle": angle, "visible": visible, "last_seen": last_seen}
+    detector.robot_pose = [robot_position['x'],
+                           robot_position['y'],
+                           robot_position['angle']]
 
 def on_receive_start():
     # This is called when the competition is started (and every 10 seconds during the competition)

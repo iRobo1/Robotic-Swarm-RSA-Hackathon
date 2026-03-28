@@ -9,6 +9,10 @@ import cv2
 import numpy as np
 import threading
 import library.utils as utils
+from src.computer_vision.pioneer_robot import process_blobs_refined
+from src.computer_vision.position_estimator import (estimate_distance_from_img,
+                                                    estimate_obj_angle_in_img,
+                                                    estimate_position_from_img)
 
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
@@ -25,7 +29,7 @@ class Detector:
                                                             self._on_receive_image,
                                                             10,
                                                             callback_group=MutuallyExclusiveCallbackGroup())
-
+        self.robot_pose = [0.0, 0.0, 0.0] # x, y, yaw
         # self._start_thread()
 
     def detect_objective_tags(self):
@@ -75,6 +79,18 @@ class Detector:
     def _on_receive_image(self, msg):
         self.latest_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8")
         tags = self.detect_objective_tags()
+
+        pioneer_fov_h = 80 # deg
+        pioneer_fov_v = 64 # deg
+
+        _, baskets = process_blobs_refined(self.latest_image)
+        img_height, img_width = self.latest_image.shape
+        for basket in baskets:
+            x_center, y_base = basket # y_base is currently really height
+            angle = estimate_obj_angle_in_img(img_width, pioneer_fov_h, x_center, self.robot_pose[-1])
+            dist = estimate_distance_from_img(img_height, pioneer_fov_v, y_base)
+            basket_coord = estimate_position_from_img(tuple(self.robot_pose[:-1]), dist, angle)
+            self.node.get_logger().info(f"Estimated basket coord: {basket_coord}")
 
         if not tags:
             self.node.get_logger().info("No tags detected.")
