@@ -1,7 +1,7 @@
 # Objects related to Robots
 
 from enum import Enum
-from utils import Position
+from src.utils import Position
 
 class Team(Enum):
     PINK = 1
