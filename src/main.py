@@ -9,8 +9,9 @@ import numpy as np
 
 from library.robot_small import Robot # Change to robot_big for the MIRTE Master
 from library.detector import Detector
-from library.communication import Communication
+from library.communication import Communication, OUR_BASKET_MSG
 import library.utils as utils
+from arena import Basket, Position, Team
 
 
 ###### Setup ######
@@ -59,12 +60,30 @@ def on_receive_objective(from_team_id, from_robot_id, tag_id, x, y, angle, visib
     }
     objectives.append(new_objective)
 
-def on_receive_custom(from_team_id, from_robot_id, internal_type, bytes):
+def on_receive_custom(from_team_id, from_robot_id, internal_type, contents):
+    print(from_team_id)
+    print(from_robot_id)
+    print(internal_type)
+    print(list(contents))
+    if internal_type == OUR_BASKET_MSG:
+        try:
+            x, y, team, scanned, item_delivered, measurement_distance = struct.unpack("<ff B ?? f", contents)
+            basket = Basket(
+                pos=Position(x, y),
+                team=Team(team),
+                measurement_distance=measurement_distance
+            )
+            basket.scanned = scanned
+            basket.item_delivered = item_delivered
+            print(f"Received basket from robot {robot_id}: {basket}")
+            return basket
+        except Exception as e:
+            print(f"Could not parse basket message: {e}")
     # This is called whenever another robot sends a custom message
     print("custom received!", internal_type)
-    if internal_type == 12:
+    if internal_type == 99:
         try:
-            a, b = struct.unpack("<BB", bytes)
+            a, b = struct.unpack("<BB", contents)
             print(a,b)
         except Exception as e:
             print("Could not parse message")
@@ -80,6 +99,11 @@ communication.register_callback_custom(on_receive_custom)
 # Send a custom message to itself (internal type 99, contents is two 8-bit integers (BB): 123 and 45)
 # You should see the robot receive this message as well
 communication.send_custom_msg(team_id, robot_id, 99, struct.pack("<BB", 123, 45))
+
+# Test basket message
+communication.send_basket(
+    Basket(Position(1, 1), 5, 2.0)
+)
 
 # Drive forward for 2 seconds
 driving_time = 30.0
