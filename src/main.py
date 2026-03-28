@@ -2,12 +2,14 @@ import time
 import rclpy
 from rclpy.node import Node 
 import math
+import random
 from sensor_msgs.msg import Image
 from enum import Enum
 import struct
 import numpy as np
 from utils import Position, Quadrant
 from arena import Arena, Basket
+
 
 # CHANGE DEPENDING ON ROBOT
 from library.robot_small import Robot # Change to robot_big for the MIRTE Master
@@ -360,7 +362,27 @@ def pathfind_towards_target(target_position: Position) -> None:
 
 # Select random position in quadrant that is atleast 1.0 meters away from the robot
 def new_random_position(quadrant: Quadrant) -> Position:
-    pass
+    if robot_position is None:
+        return None
+    
+    currentXPosition = robot_position["x"]
+    currentYPosition = robot_position["y"]
+
+    while True:
+        rand_x = random.uniform(quadrant.lower.x, quadrant.upper.x)
+        rand_y = random.uniform(quadrant.lower.y, quadrant.upper.y)
+
+        # Compute distance
+        distance = math.sqrt(
+            (currentXPosition - rand_x) ** 2 +
+            (currentYPosition - rand_y) ** 2
+        )
+
+        # Check constraint
+        if distance >= 1.0:
+            return Position(rand_x, rand_y)
+
+    
 
 
 # Forces the robot to make a 90 degree turn (to see new baskets with camera)
@@ -371,7 +393,17 @@ def turn_90_clockwise() -> None:
 
 # Calculates the distance from the robot to the target
 def distance_to_target(target_position: Position) -> float:
-    pass
+    currentXPosition = robot_position["x"]
+    currentYPosition = robot_position["y"]
+
+    toGoXPosition = target_position.x;
+    toGoYPosition = target_position.y;
+
+    distance = math.sqrt(
+        (currentXPosition - toGoXPosition) ** 2 +
+        (currentYPosition - toGoYPosition) ** 2
+    )
+    return distance
 
 ###############################
 ###### ACTUAL MAIN LOOPS ######
