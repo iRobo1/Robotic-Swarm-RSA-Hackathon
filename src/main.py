@@ -110,9 +110,6 @@ while time.time() < t_end:
 ###### SHARED VARIABLES ######
 ##############################
 
-current_robot_position = Position(0.0, 0.0)
-
-
 starting_time = time.time()
 
 current_quadrant = None # the quadrant the robot is supposed to be inside
