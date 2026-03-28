@@ -1,18 +1,24 @@
 import numpy as np
 
-
 def wrap_angle(angle):
     return (angle + np.pi) % (2 * np.pi) - np.pi
 
 
 class MotionPlanning:
+    # def __init__(self,
+    #              k_rho=0.4, k_alpha=1.2, k_beta=0.0, k_theta=2.0,
+    #              v_max=0.4, w_max=0.8, dt=0.05,
+    #              dist_thresh=0.1, theta_thresh=0.05,
+    #              k_rep=0.3, rep_radius=0.5,
+    #              W=None, H=None, k_bound=0.3, bound_radius=0.4,
+    #              sensor_angles=None, sensor_rep_radius=0.4, k_sensor=0.5):
     def __init__(self,
-                 k_rho=0.4, k_alpha=1.2, k_beta=0.0, k_theta=2.0,
-                 v_max=0.4, w_max=0.8, dt=0.05,
+                 k_rho=0.2, k_alpha=1.8, k_beta=0.2, k_theta=2.0,
+                 v_max=0.4, w_max=0.8, dt=0.01,
                  dist_thresh=0.1, theta_thresh=0.05,
                  k_rep=0.3, rep_radius=0.5,
                  W=None, H=None, k_bound=0.3, bound_radius=0.4,
-                 sensor_angles=None, sensor_rep_radius=0.4, k_sensor=0.5):
+                 sensor_angles=None, sensor_rep_radius=0.5, k_sensor=0.8):
         # Attractive controller gains
         self.k_rho       = k_rho
         self.k_alpha     = k_alpha
