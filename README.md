@@ -1,5 +1,5 @@
 # A Swarming Algorithm for Emergency Response Robots by Team Thermites
-We developed a custom swarming algorithm for emergency response robots during the Swarming Hackathon. The hackathon was organised by TU Delft's Robotics Student Association (RSA).
+We developed a custom swarming algorithm for emergency response robots during the Swarming Hackathon. The hackathon was organised by Delft's Robotics Student Association (RSA).
 
 Our algorithm scored the highest out of all teams for swarm performance.
 
