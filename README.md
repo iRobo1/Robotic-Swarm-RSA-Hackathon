@@ -20,7 +20,10 @@ Unfortunately, some small parts of the codebase were also modified last minute a
 
 ## Hackathon Sponsors
 Thank you to the Robotics Student Association (RSA) for organising this amazing hackathon and to all the hackathon sponsors who made this possible:
-- Lunar Zebro
+- RoboHouse
+- Robotics Student Association
+- Even Groene Vrienden
 - Beethoven
-- Robotic Association
 - Asimov
+- TU Delft Science Centre Swarming Lab
+- Lunar Zebro
